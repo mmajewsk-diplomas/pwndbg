@@ -204,6 +204,9 @@ class CallOutput:
     def write(self, data) -> None:
         self.func(data)
 
+    def writelines(self, lines_iterable) -> None:
+        self.func("".join(lines_iterable))
+
     def flush(self):
         try:
             return self.func.flush()
