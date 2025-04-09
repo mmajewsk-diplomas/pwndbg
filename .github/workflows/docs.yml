@@ -16,6 +16,15 @@ jobs:
       - name: Install uv
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
 
+      - name: Install gdb (needed for doc verification)
+        run: |
+          sudo apt update
+          sudo apt install -y gdb
+
+      - name: Verify docs are up to date with source
+        run: |
+          ./scripts/verify_docs.sh
+
       - name: Copy README.md to docs/index.md
         run: cp README.md docs/index.md
 
@@ -35,6 +44,15 @@ jobs:
 
       - name: Install uv
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Install gdb (needed for doc verification)
+        run: |
+          sudo apt update
+          sudo apt install -y gdb
+
+      - name: Verify docs are up to date with source
+        run: |
+          ./scripts/verify_docs.sh
 
       - name: Copy README.md to docs/index.md
         run: cp README.md docs/index.md
