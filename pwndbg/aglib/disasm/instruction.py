@@ -18,6 +18,10 @@ from capstone.aarch64 import AARCH64_INS_BLR
 from capstone.aarch64 import AARCH64_INS_BR
 from capstone.arm import ARM_INS_TBB
 from capstone.arm import ARM_INS_TBH
+from capstone.loongarch import LOONGARCH_INS_ALIAS_JR
+from capstone.loongarch import LOONGARCH_INS_B
+from capstone.loongarch import LOONGARCH_INS_BL
+from capstone.loongarch import LOONGARCH_INS_JIRL
 from capstone.mips import MIPS_INS_ALIAS_B
 from capstone.mips import MIPS_INS_ALIAS_BAL
 from capstone.mips import MIPS_INS_B
@@ -82,6 +86,12 @@ UNCONDITIONAL_JUMP_INSTRUCTIONS: Dict[int, Set[int]] = {
     },
     CS_ARCH_PPC: {PPC_INS_B, PPC_INS_BA, PPC_INS_BL, PPC_INS_BLA},
     CS_ARCH_SYSTEMZ: {SYSTEMZ_INS_B, SYSTEMZ_INS_BAL, SYSTEMZ_INS_BALR},
+    CS_ARCH_LOONGARCH: {
+        LOONGARCH_INS_B,
+        LOONGARCH_INS_BL,
+        LOONGARCH_INS_JIRL,
+        LOONGARCH_INS_ALIAS_JR,
+    },
 }
 
 # See: https://github.com/capstone-engine/capstone/issues/2448
@@ -132,6 +142,8 @@ CAPSTONE_ARCH_MAPPING_STRING = {
     CS_ARCH_MIPS: "mips",
     CS_ARCH_SPARC: "sparc",
     CS_ARCH_RISCV: "RISCV",
+    CS_ARCH_SYSTEMZ: "s390x",
+    CS_ARCH_LOONGARCH: "loongarch",
 }
 
 
