@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from enum import Enum
 from functools import total_ordering
 from typing import Any
 from typing import Callable
@@ -45,6 +46,18 @@ PARAM_CLASSES = {
     str: PARAM_STRING,
 }
 
+# Strings that will be used in supplementing the parameter help_docstring
+HELP_DEFAULT_PREFIX = "Default:"
+HELP_VALID_VALUES_PREFIX = "Valid values:"
+
+
+class Scope(Enum):
+    # If you want to add another scope here, don't forget to add
+    # a command which prints it!
+    config = 1
+    theme = 2
+    heap = 3
+
 
 # @total_ordering allows us to implement `__eq__` and `__lt__` and have all the
 # other comparison operators handled for us
@@ -59,28 +72,32 @@ class Parameter:
         help_docstring: str = "",
         param_class: int | None = None,
         enum_sequence: Sequence[str] | None = None,
-        scope: str = "config",
+        scope: Scope = Scope.config,
     ) -> None:
         self.name = name
         self.default = default
         self._value = default
         self.param_class = param_class or PARAM_CLASSES[type(default)]
-        # Note: `set_show_doc` should be a noun phrase, e.g. "the value of the foo"
-        # The `set_doc` will be "Set the value of the foo."
-        # The `show_doc` will be "Show the value of the foo."
-        # `get_set_string()` will return "Set the value of the foo to VALUE."
-        # `get_show_string()` will return "Show the value of the foo."
-        self.set_show_doc = set_show_doc.strip()
-        self.help_docstring = help_docstring.strip()
-        # Show the default value in the parameter help
-        self.help_docstring += "\n\nDefault: " + self.pretty_default()
+        # Note: If `set_show_doc` is "the value of foo" then:
+        # The `set_doc` will be "Set the value of foo."
+        # The `show_doc` will be "Show the value of foo."
+        # `get_set_string()` will return "Set the value of foo to VALUE."
+        # `get_show_string()` will return "Show the value of foo."
+        self.set_show_doc = set_show_doc
+        self.help_docstring = help_docstring
+        # Show the default value in the parameter help.
+        # We add a trailing double space because docs are in markdown.
+        self.help_docstring += "\n\n" + HELP_DEFAULT_PREFIX + " " + self.pretty_default() + "  "
         # Show valid values if they aren't obvious
         if param_class == PARAM_ENUM:
             self.help_docstring += (
-                "\nValid values: " + ", ".join([f"'{name}'" for name in enum_sequence]) + "."
+                "\n"
+                + HELP_VALID_VALUES_PREFIX
+                + " "
+                + ", ".join([f"'{name}'" for name in enum_sequence])
             )
         if param_class == PARAM_AUTO_BOOLEAN:
-            self.help_docstring += "\nValid values: on, off, auto."
+            self.help_docstring += "\n" + HELP_VALID_VALUES_PREFIX + " on, off, auto."
 
         self.enum_sequence = enum_sequence
         self.scope = scope
@@ -123,7 +140,11 @@ class Parameter:
                 return "auto"
             else:
                 return "on" if val else "off"
-        elif self.param_class == PARAM_STRING or self.param_class == PARAM_ENUM:
+        elif (
+            self.param_class == PARAM_STRING
+            or self.param_class == PARAM_ENUM
+            or self.param_class == PARAM_OPTIONAL_FILENAME
+        ):
             return "'" + val + "'"
         else:
             return str(val)
@@ -209,17 +230,36 @@ class Config:
         help_docstring: str = "",
         param_class: int | None = None,
         enum_sequence: Sequence[str] | None = None,
-        scope: str = "config",
+        scope: Scope = Scope.config,
     ) -> Parameter:
         # Dictionary keys are going to have underscores, so we can't allow them here
         assert "_" not in name
-        assert len(name) <= 32 and "Config name too long."
+        assert len(name) <= 32 and "Parameter name too long."
+        assert name and "Parameter name cannot be empty."
+
+        set_show_doc = set_show_doc.strip()
+        help_docstring = help_docstring.strip()
+        assert set_show_doc and "Parameter's set_show_doc cannot be empty."
         assert (
             len(set_show_doc) <= 70
-            and "Config set_show_doc too long, use the help_docstring parameter."
+            and "Parameter's set_show_doc too long, use the help_docstring parameter."
         )
+        assert set_show_doc[-1] != "." and "Don't end set_show_doc with punctuation."
+        assert (
+            HELP_DEFAULT_PREFIX not in help_docstring
+            and f"Having the string '{HELP_DEFAULT_PREFIX }' in the help_docstring "
+            "messes with documentation generation. Please remove it, it is automatically generated."
+        )
+        assert (
+            HELP_VALID_VALUES_PREFIX not in help_docstring
+            and f"Having the string '{HELP_VALID_VALUES_PREFIX}' in the help_docstring "
+            "messes with documentation generation. Please remove it, you can use param_class=PARAM_ENUM."
+        )
+
         if param_class == PARAM_ENUM or enum_sequence:
             assert param_class == PARAM_ENUM and enum_sequence
+
+        assert scope in Scope
 
         p = Parameter(
             name,
@@ -251,7 +291,7 @@ class Config:
 
         return wrapper
 
-    def get_params(self, scope: str) -> List[Parameter]:
+    def get_params(self, scope: Scope) -> List[Parameter]:
         return sorted(filter(lambda p: p.scope == scope, self.params.values()))
 
     def __getattr__(self, name: str) -> Parameter:

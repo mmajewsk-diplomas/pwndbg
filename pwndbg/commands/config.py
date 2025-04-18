@@ -14,6 +14,7 @@ from pwndbg.color import ljust_colored
 from pwndbg.color import strip
 from pwndbg.color.message import hint
 from pwndbg.commands import CommandCategory
+from pwndbg.lib.config import Scope
 
 if pwndbg.dbg.is_gdblib_available():
     import pwndbg.gdblib.config
@@ -42,7 +43,7 @@ def extend_value_with_default(value, default):
     return value
 
 
-def get_config_parameters(scope, filter_pattern):
+def get_config_parameters(scope: Scope, filter_pattern: str):
     values = [
         v
         for k, v in pwndbg.config.params.items()
@@ -70,11 +71,11 @@ parser.add_argument(
 )
 
 
-def display_config(filter_pattern: str, scope: str, has_file_command: bool = True) -> None:
+def display_config(filter_pattern: str, scope: Scope, has_file_command: bool = True) -> None:
     values = get_config_parameters(scope, filter_pattern)
 
     if not values:
-        print(hint(f'No {scope} parameter found with filter "{filter_pattern}"'))
+        print(hint(f'No {scope.name} parameter found with filter "{filter_pattern}"'))
         return
 
     longest_optname = max(map(len, (v.name for v in values)))
@@ -86,7 +87,7 @@ def display_config(filter_pattern: str, scope: str, has_file_command: bool = Tru
     for v in sorted(values):
         if isinstance(v, pwndbg.color.theme.ColorParameter):
             # Only the theme scope should use ColorParameter
-            assert scope == "theme"
+            assert scope == Scope.theme
 
             value = generateColorFunction(v.value)(v.value)
             default = generateColorFunction(v.default)(v.default)
@@ -98,13 +99,13 @@ def display_config(filter_pattern: str, scope: str, has_file_command: bool = Tru
 
     print(
         hint(
-            f"You can set a {scope} variable with `set <{scope}-var> <value>`, and read more about it with `help set <{scope}-var>`."
+            f"You can set a {scope.name} variable with `set <{scope.name}-var> <value>`, and read more about it with `help set <{scope.name}-var>`."
         )
     )
     if has_file_command:
         print(
             hint(
-                f"You can generate a configuration file using `{scope}file` "
+                f"You can generate a configuration file using `{scope.name}file` "
                 "- then put it in your .gdbinit after initializing pwndbg."
             )
         )
@@ -112,7 +113,7 @@ def display_config(filter_pattern: str, scope: str, has_file_command: bool = Tru
 
 @pwndbg.commands.ArgparsedCommand(parser, category=CommandCategory.PWNDBG)
 def config(filter_pattern) -> None:
-    display_config(filter_pattern, "config")
+    display_config(filter_pattern, Scope.config)
 
 
 configfile_parser = argparse.ArgumentParser(
@@ -134,14 +135,14 @@ parser.add_argument(
 
 @pwndbg.commands.ArgparsedCommand(parser, category=CommandCategory.PWNDBG)
 def theme(filter_pattern) -> None:
-    display_config(filter_pattern, "theme")
+    display_config(filter_pattern, Scope.theme)
 
 
 if pwndbg.dbg.is_gdblib_available():
-
+    # Register the configfile command
     @pwndbg.commands.ArgparsedCommand(configfile_parser, category=CommandCategory.PWNDBG)
     def configfile(show_all=False) -> None:
-        configfile_print_scope("config", show_all)
+        configfile_print_scope(Scope.config, show_all)
 
 
 themefile_parser = argparse.ArgumentParser(
@@ -153,13 +154,33 @@ themefile_parser.add_argument(
 
 
 if pwndbg.dbg.is_gdblib_available():
-
+    # Register the themefile command.
     @pwndbg.commands.ArgparsedCommand(themefile_parser, category=CommandCategory.PWNDBG)
     def themefile(show_all=False) -> None:
-        configfile_print_scope("theme", show_all)
+        configfile_print_scope(Scope.theme, show_all)
 
 
-def configfile_print_scope(scope: str, show_all: bool = False) -> None:
+parser = argparse.ArgumentParser(description="Shows heap related configuration.")
+parser.add_argument(
+    "filter_pattern",
+    type=str,
+    nargs="?",
+    default=None,
+    help="Filter to apply to config parameters names/descriptions",
+)
+
+
+@pwndbg.commands.ArgparsedCommand(parser, category=CommandCategory.PWNDBG)
+def heap_config(filter_pattern: str) -> None:
+    display_config(filter_pattern, Scope.heap, has_file_command=False)
+    print(
+        hint(
+            "Some parameters (e.g. main-arena) will be used only when resolve-heap-via-heuristic is `auto` or `force`"
+        )
+    )
+
+
+def configfile_print_scope(scope: Scope, show_all: bool = False) -> None:
     params = pwndbg.config.get_params(scope)
 
     if not show_all:
@@ -180,4 +201,5 @@ def configfile_print_scope(scope: str, show_all: bool = False) -> None:
             print(f"set {p.name} {native_value}")
             print()
     else:
-        print(hint(f"No changed values. To see current values use `{scope}`."))
+        # FIXME: Message would be wrong for a heapfile command.
+        print(hint(f"No changed values. To see current values use `{scope.name}`."))
