@@ -92,26 +92,38 @@ download_zig_binary() {
     # Install zig to current directory
     # We use zig to compile some test binaries as it is much easier than with gcc
 
+    TARGET_ZIG_VERSION="0.13.0"
+    ZIG_TAR_URL="https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz"
+    ZIG_TAR_SHA256="d45312e61ebcc48032b77bc4cf7fd6915c11fa16e4aad116b66c9468211230ea"
+
     if command -v "${ZIGPATH}"/zig &> /dev/null; then
-        echo "Zig is already installed. Skipping build and install."
-    else
-        echo "Downloading and installing Zig..."
-        ZIG_TAR_URL="https://ziglang.org/download/0.10.1/zig-linux-x86_64-0.10.1.tar.xz"
-        ZIG_TAR_SHA256="6699f0e7293081b42428f32c9d9c983854094bd15fee5489f12c4cf4518cc380"
-        curl --output /tmp/zig.tar.xz "${ZIG_TAR_URL}"
-        ACTUAL_SHA256=$(sha256sum /tmp/zig.tar.xz | cut -d' ' -f1)
-        if [ "${ACTUAL_SHA256}" != "${ZIG_TAR_SHA256}" ]; then
-            echo "Zig binary checksum mismatch"
-            echo "Expected: ${ZIG_TAR_SHA256}"
-            echo "Actual: ${ACTUAL_SHA256}"
-            exit 1
+        ZIG_VERSION=$("$ZIGPATH/zig" version)
+
+        if [ "${ZIG_VERSION}" = "${TARGET_ZIG_VERSION}" ]; then
+            echo "Zig is already installed. Skipping build and install."
+            return
+        else
+            echo "Old version of Zig installed (${ZIG_VERSION}). Installing version ${TARGET_ZIG_VERSION}."
         fi
-
-        tar -C /tmp -xJf /tmp/zig.tar.xz
-
-        mv /tmp/zig-linux-x86_64-* ${ZIGPATH} &> /dev/null || true
-        echo "Zig installed to ${ZIGPATH}"
     fi
+
+    echo "Downloading and installing Zig..."
+    curl --output /tmp/zig.tar.xz "${ZIG_TAR_URL}"
+    ACTUAL_SHA256=$(sha256sum /tmp/zig.tar.xz | cut -d' ' -f1)
+    if [ "${ACTUAL_SHA256}" != "${ZIG_TAR_SHA256}" ]; then
+        echo "Zig binary checksum mismatch"
+        echo "Expected: ${ZIG_TAR_SHA256}"
+        echo "Actual: ${ACTUAL_SHA256}"
+        exit 1
+    fi
+
+    tar -C /tmp -xJf /tmp/zig.tar.xz
+
+    # Delete previous installation
+    rm -rf "${ZIGPATH}"
+
+    mv /tmp/zig-linux-x86_64-* ${ZIGPATH} &> /dev/null || true
+    echo "Zig installed to ${ZIGPATH}"
 }
 
 install_apt() {
