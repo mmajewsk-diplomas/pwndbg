@@ -702,14 +702,13 @@ def context(subcontext=None, enabled=None) -> None:
         subcontext = []
     args = subcontext
 
-    if len(args) == 0:
-        args = config_context_sections.split()
-
     # Inform when sections set to be empty
     sections = pwndbg.config.context_sections.split()
     if not sections:
         print(message.warn("Sections set to be empty."))
-        return
+    
+    if len(args) == 0:
+        args = config_context_sections.split()
 
     sections = []
     if args:
