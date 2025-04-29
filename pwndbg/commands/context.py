@@ -705,6 +705,12 @@ def context(subcontext=None, enabled=None) -> None:
     if len(args) == 0:
         args = config_context_sections.split()
 
+    # Inform when sections set to be empty
+    sections = pwndbg.config.context_sections.split()
+    if not sections:
+        print(message.warn("Sections set to be empty."))
+        return
+
     sections = []
     if args:
         if selected_history_index is None:
@@ -715,7 +721,7 @@ def context(subcontext=None, enabled=None) -> None:
             sections.append(("legend", lambda *args, **kwargs: [M.legend() + history_status]))
 
     sections += [(arg, context_sections.get(arg[0], None)) for arg in args]
-
+        
     result = defaultdict(list)
     result_settings: DefaultDict[str, Dict[Any, Any]] = defaultdict(dict)
     for section, func in sections:
