@@ -107,9 +107,9 @@ While most other GDB plugins are well *GDB plugins*, Pwndbg's implementation is 
 
 ![](assets/caps/lldb.png){ style="width: 70%;" }
 
-## Windbg Compatibility
+## WinDbg Compatibility
 
-For those coming from a Windows background, Pwndbg has a complete Windbg compatibility layer.  You can `dd`, `dps`, `eq`, and even `eb $rip 90` to your heart's content.
+For those coming from a Windows background, Pwndbg has a complete WinDbg compatibility layer.  You can `dd`, `dps`, `eq`, and even `eb $rip 90` to your heart's content.
 
 ![](assets/caps/windbg.png){ style="width: 70%;" }
 
@@ -127,7 +127,8 @@ Go take a look at [Commands](commands/index.md)! Here is some cool stuff you can
 
 Use the [`procinfo`](commands/process/procinfo.md) command in order to inspect the current process state, like UID, GID, Groups, SELinux context, and open file descriptors! Pwndbg works particularly well with remote GDB debugging like with Android phones.
 
-![](assets/caps/procinfo.png)
+![](assets/caps/procinfo.png){ style="width: 50%;" }
+![](assets/caps/procinfo_curl.png){ style="width: 50%;" }
 
 ### ROP Gadgets
 
