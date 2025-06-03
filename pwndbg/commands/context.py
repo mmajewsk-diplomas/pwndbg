@@ -703,7 +703,7 @@ def context(subcontext=None, enabled=None) -> None:
     args = subcontext
 
     # Inform when sections set to be empty
-    sections = pwndbg.config.context_sections.split()
+    sections = pwndbg.config.context_sections
     if not sections:
         print(message.warn("Context sections are empty. You can set context-sections to the following values: args, regs, disasm, stack, backtrace, code, expressions, ghidra, heap_tracker, threads, last_signal"))
     
