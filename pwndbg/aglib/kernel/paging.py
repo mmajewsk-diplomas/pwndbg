@@ -15,7 +15,7 @@ ENTRYMASK = ~((1 << 12) - 1) & ((1 << 51) - 1)
 
 @pwndbg.lib.cache.cache_until("start", "stop")
 def get_memory_map_raw() -> Tuple[pwndbg.lib.memory.Page, ...]:
-    return pwndbg.aglib.kernel.vmmap.kernel_vmmap()
+    return pwndbg.aglib.kernel.vmmap.kernel_vmmap(False)
 
 
 def find_kbase(pages) -> int | None:
@@ -32,7 +32,7 @@ def find_kbase(pages) -> int | None:
 
     mappings = pages
     for mapping in mappings:
-        # TODO: Check alignment
+        # should be page aligned -- either from pt-dump or info mem
 
         # only search in kernel mappings:
         # https://www.kernel.org/doc/html/v5.3/arm64/memory.html
@@ -68,11 +68,11 @@ guess_physmap = config.add_param(
 
 
 def physmap_base() -> int:
-    if pwndbg.aglib.kernel.has_debug_syms():
+    if pwndbg.aglib.kernel.has_debug_syms() and pwndbg.aglib.arch.name == "x86-64":
         result = pwndbg.aglib.symbol.lookup_symbol_value("page_offset_base")
         if result is not None:
             return result
-    if guess_physmap:
+    if guess_physmap or pwndbg.aglib.arch.name == "aarch64":
         result = guess_physmap_base()
         if result is not None:
             return result
