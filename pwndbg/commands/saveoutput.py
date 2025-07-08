@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import pwndbg.commands
 import pwndbg.color.message as message
-import gdb
+if pwndbg.dbg.is_gdblib_available():
+    import gdb
 
 saved_outputs = {}
 last_command = None
 
-@pwndbg.commands.Command
+@pwndbg.commands.Command(category='user')
 def saveoutput(*args):
     global saved_outputs, last_command
     if args:

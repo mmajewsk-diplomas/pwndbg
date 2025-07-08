@@ -3,10 +3,11 @@ from __future__ import annotations
 import pwndbg.commands
 import difflib
 import pwndbg.color.message as message
-import gdb
 from pwndbg.commands.saveoutput import saved_outputs, last_command 
-
-@pwndbg.commands.Command
+if pwndbg.dbg.is_gdblib_available():
+    import gdb
+    
+@pwndbg.commands.Command(category='user')
 def diffoutput(*args):
     global saved_outputs, last_command
     if args:

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import gdb
 import pytest
 import pwndbg.commands.diffoutput
 import pwndbg.commands.saveoutput
 import tests
+if pwndbg.dbg.is_gdblib_available():
+    import gdb
 
 REFERENCE_BINARY = tests.binaries.get("reference-binary.out")
 
