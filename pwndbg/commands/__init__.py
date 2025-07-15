@@ -800,3 +800,4 @@ def load_commands() -> None:
     import pwndbg.commands.xor
     import pwndbg.commands.saveoutput
     import pwndbg.commands.diffoutput
+    import pwndbg.commands.setrlimit
