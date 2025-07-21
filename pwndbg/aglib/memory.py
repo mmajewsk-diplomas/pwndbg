@@ -183,12 +183,14 @@ def uint(addr: int) -> int:
     return readtype(pwndbg.aglib.typeinfo.uint, addr)
 
 
-def pvoid(addr: int) -> int:
-    """pvoid(addr) -> int
-
-    Read one pointer from the specified address.
+def read_pointer_width(addr: int) -> int:
     """
-    return readtype(pwndbg.aglib.typeinfo.pvoid, addr)
+    Read one pointer-width integer at the specified address.
+
+    Raises:
+        pwndbg.dbg_mod.Error: if memory read fails.
+    """
+    return pwndbg.aglib.arch.unpack(read(addr, pwndbg.aglib.arch.ptrsize))
 
 
 def u8(addr: int) -> int:
@@ -265,6 +267,14 @@ def s64(addr: int) -> int:
     Read one ``int64_t`` from the specified address.
     """
     return readtype(pwndbg.aglib.typeinfo.int64, addr)
+
+
+def sint(addr: int) -> int:
+    """
+    Read one `signed int` from the specified
+    address.
+    """
+    return readtype(pwndbg.aglib.typeinfo.sint, addr)
 
 
 def cast_pointer(
@@ -414,3 +424,24 @@ def resolve_renamed_struct_field(struct_name: str, possible_field_names: Set[str
             return field_name
 
     raise ValueError(f"Field name did not match any of {possible_field_names}.")
+
+
+@pwndbg.lib.cache.cache_until("start", "objfile")
+def is_pagefault_supported() -> bool:
+    """
+    This function should be called before stray memory dereferences to protect against the following situations:
+
+    1. On embedded systems, it's not uncommon for MMIO regions to exist where memory reads might mutate the hardware/process state.
+    2. On baremetal/embedded, paging doesn't always exist, so all memory is "valid" (and often initialized to zero) - this makes every value appear to be a pointer.
+
+    As such, we disable dereferencing by default for bare metal targets.
+
+    See more discussion here: https://github.com/pwndbg/pwndbg/pull/385
+    """
+
+    # TODO: use a better detection method
+    return pwndbg.dbg.selected_inferior().is_linux()
+
+
+def is_kernel(addr: int):
+    return addr >> 63 == 1

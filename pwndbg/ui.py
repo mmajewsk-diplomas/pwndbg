@@ -11,7 +11,6 @@ import pwndbg.color.context as C
 import pwndbg.dbg
 from pwndbg import config
 from pwndbg.color import ljust_colored
-from pwndbg.color import message
 from pwndbg.color import rjust_colored
 from pwndbg.color import strip
 from pwndbg.color import theme
@@ -21,19 +20,13 @@ theme.add_param("banner-title-surrounding-left", "[ ", "banner title surrounding
 theme.add_param(
     "banner-title-surrounding-right", " ]", "banner title surrounding char (right side)"
 )
-title_position = theme.add_param("banner-title-position", "center", "banner title position")
-
-
-@config.trigger(title_position)
-def check_title_position() -> None:
-    valid_values = ["center", "left", "right"]
-    if title_position not in valid_values:
-        print(
-            message.warn(
-                f"Invalid title position: {title_position}, must be one of: {', '.join(valid_values)}"
-            )
-        )
-        title_position.revert_default()
+title_position = theme.add_param(
+    "banner-title-position",
+    "center",
+    "banner title position",
+    param_class=pwndbg.lib.config.PARAM_ENUM,
+    enum_sequence=["center", "left", "right"],
+)
 
 
 def banner(title, target=sys.stdout, width=None, extra=""):
@@ -64,7 +57,7 @@ def addrsz(address) -> str:
 
 
 def get_window_size(target=sys.stdout):
-    fallback = (int(os.environ.get("LINES", 20)), int(os.environ.get("COLUMNS", 80)))
+    fallback = (int(os.environ.get("LINES", 24)), int(os.environ.get("COLUMNS", 80)))
     if not target.isatty():
         return fallback
     if os.environ.get("PWNDBG_IN_TEST") is not None:
@@ -78,7 +71,7 @@ def get_window_size(target=sys.stdout):
 
     try:
         term = os.get_terminal_size(target.fileno())
-        return term.lines, term.columns
+        return term.lines or fallback[0], term.columns or fallback[1]
     except Exception:
         pass
 

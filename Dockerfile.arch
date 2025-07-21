@@ -14,7 +14,7 @@ FROM $image
 WORKDIR /pwndbg
 
 ENV PIP_NO_CACHE_DIR=true
-ENV LANG en_US.utf8
+ENV LANG=en_US.utf8
 ENV TZ=America/New_York
 ENV ZIGPATH=/opt/zig
 ENV PWNDBG_VENV_PATH=/venv
@@ -26,6 +26,10 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && \
     localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8 && \
     pacman -S --noconfirm vim && \
     pacman -Scc --noconfirm
+
+# setup.sh needs scripts/common.sh
+RUN mkdir scripts
+ADD ./scripts/common.sh /pwndbg/scripts/
 
 ADD ./setup.sh /pwndbg/
 ADD ./uv.lock /pwndbg/
