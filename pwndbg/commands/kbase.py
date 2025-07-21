@@ -18,7 +18,7 @@ parser = argparse.ArgumentParser(description="Finds the kernel virtual base addr
 parser.add_argument("-r", "--rebase", action="store_true", help="rebase loaded symbol file")
 
 
-@pwndbg.commands.ArgparsedCommand(parser, category=CommandCategory.KERNEL)
+@pwndbg.commands.Command(parser, category=CommandCategory.KERNEL)
 @pwndbg.commands.OnlyWhenQemuKernel
 @pwndbg.commands.OnlyWhenPagingEnabled
 def kbase(rebase=False) -> None:
@@ -26,7 +26,7 @@ def kbase(rebase=False) -> None:
         print(M.error("kbase does not work when kernel-vmmap is set to none"))
         return
 
-    base = pwndbg.aglib.kernel.kbase()
+    base = pwndbg.aglib.kernel.arch_paginginfo().kbase
 
     if base is None:
         print(M.error("Unable to locate the kernel base"))

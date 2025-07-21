@@ -16,6 +16,7 @@ GDB_TIPS: List[str] = [
     "If you have debugging symbols the `info args` command shows current frame's function arguments (use `up` and `down` to switch between frames)",
     'Calling functions like `call (void)puts("hello world")` will run all other target threads for the time the function runs. Use `set scheduler-locking on` to lock the execution to current thread when calling functions',
     "Use the `pipe <cmd> | <prog>` command to pass output of a GDB/Pwndbg command to a shell program, e.g. `pipe elfsections | grep bss`. This can also be shortened to: `| <cmd> | <prog>`",
+    "Prefixing a command with `!` in GDB will execute it as a shell command, e.g.: `!ls` or `!cat flag.txt`",
 ]
 
 # Pwndbg specific tips
@@ -24,7 +25,7 @@ PWNDBG_TIPS: List[str] = [
     "The `set show-flags on` setting will display CPU flags register in the regs context panel",
     "GDB and Pwndbg parameters can be shown or set with `show <param>` and `set <param> <value>` GDB commands",
     "Use Pwndbg's `config` and `theme` commands to tune its configuration and theme colors!",
-    "Pwndbg mirrors some of Windbg commands like `eq`, `ew`, `ed`, `eb`, `es`, `dq`, `dw`, `dd`, `db`, `ds` for writing and reading memory",
+    "Pwndbg mirrors some of WinDbg commands like `eq`, `ew`, `ed`, `eb`, `es`, `dq`, `dw`, `dd`, `db`, `ds` for writing and reading memory",
     "Pwndbg resolves kernel memory maps by parsing page tables (default) or via `monitor info mem` QEMU gdbstub command (use `set kernel-vmmap-via-page-tables off` for that)",
     "Use the `vmmap` command for a better & colored memory maps display (than the GDB's `info proc mappings`)",
     "Use the `telescope` command to dereference a given address/pointer multiple times (if the dereferenced value is a valid ptr; see `config telescope` to configure its behavior)",
@@ -42,7 +43,7 @@ PWNDBG_TIPS: List[str] = [
     "Use the `spray` command to spray memory with cyclic pattern or specified value",
     "Use `patch <address> '<assembly>'` to patch an address with given assembly code",
     "Want to NOP some instructions? Use `patch <address> 'nop; nop; nop'`",
-    "`heap_config` shows heap related configuration",
+    "`heap-config` shows heap related configuration",
     "`break-if-taken` and `break-if-not-taken` commands sets breakpoints after a given jump instruction was taken or not",
     "`stepuntilasm <assembly-instruction [operands]>` steps program forward until matching instruction occures",
     "Use `plist` command to dump elements of linked list",

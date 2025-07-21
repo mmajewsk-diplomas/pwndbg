@@ -1,3 +1,10 @@
+"""
+Performs handling of the linux auxiliary vector.
+
+https://www.man7.org/linux/man-pages/man3/getauxval.3.html
+https://lwn.net/Articles/519085/
+"""
+
 from __future__ import annotations
 
 import re
@@ -28,7 +35,7 @@ if pwndbg.dbg.is_gdblib_available():
 auto_explore = pwndbg.config.add_param(
     "auto-explore-auxv",
     "warn",
-    "stack exploration for AUXV information; it may be really slow.",
+    "stack exploration for AUXV information; it may be really slow",
     param_class=pwndbg.lib.config.PARAM_ENUM,
     enum_sequence=["warn", "yes", "no"],
 )
@@ -130,7 +137,7 @@ def explore_stack_auxv() -> AUXV | None:
             M.warn(
                 "Warning: All methods to detect AUXV have failed.\n"
                 "You can explore AUXV using stack exploration, but it may be very slow.\n"
-                "To explicitly explore, use the command: `auxv_explore`\n"
+                "To explicitly explore, use the command: `auxv-explore`\n"
                 "Alternatively, enable it by default with: `set auto-explore-auxv yes`\n\n"
                 "Note: AUXV is probably not necessary for debugging firmware or embedded systems."
             )
