@@ -14,6 +14,7 @@ from elftools.elf.elffile import ELFFile
 import pwndbg.aglib.arch
 import pwndbg.aglib.elf
 import pwndbg.aglib.file
+import pwndbg.aglib.qemu
 import pwndbg.aglib.vmmap
 import pwndbg.aglib.vmmap_custom
 import pwndbg.color.memory as M
@@ -49,7 +50,7 @@ def print_vmmap_table_header() -> None:
     prefer_relpaths = "on" if pwndbg.config.vmmap_prefer_relpaths else "off"
     width = 2 + 2 * pwndbg.aglib.arch.ptrsize
     print(
-        f"{'Start':>{width}} {'End':>{width}} {'Perm'} {'Size':>8} {'Offset':>6} "
+        f"{'Start':>{width}} {'End':>{width}} {'Perm'} {'Size':>8} {'Offset':>7} "
         f"{'File'} (set vmmap-prefer-relpaths {prefer_relpaths})"
     )
 
@@ -151,7 +152,6 @@ def print_vmmap_gaps(pages: Tuple[Page, ...]) -> None:
 
 
 parser = argparse.ArgumentParser(
-    formatter_class=argparse.RawTextHelpFormatter,
     description="""Print virtual memory map pages.
 
 Unnamed mappings are named as [anon_%#x] where %#x is high part of their start address. This is useful for filtering with `vmmap` or `search` commands.
@@ -165,7 +165,7 @@ For coredump debugging, GDB also lacks all vmmap info but we do our best to get 
 
 As a last resort, we sometimes try to explore the addresses in CPU registers and if they are readable by GDB, we determine their bounds and create an "<explored>" vmmap. However, this method is slow and is not used on each GDB stop.
 
-Memory pages can also be added manually with the use of vmmap_add, vmmap_clear and vmmap_load commands. This may be useful for bare metal debugging.
+Memory pages can also be added manually with the use of vmmap-add, vmmap-clear and vmmap-load commands. This may be useful for bare metal debugging.
 
 [0] https://lore.kernel.org/all/20220221030910.3203063-1-dominik.b.czarnota@gmail.com/""",
 )
@@ -194,7 +194,7 @@ parser.add_argument(
 )
 
 
-@pwndbg.commands.ArgparsedCommand(
+@pwndbg.commands.Command(
     parser, aliases=["lm", "address", "vprot", "libs"], category=CommandCategory.MEMORY
 )
 @pwndbg.commands.OnlyWhenRunning
@@ -306,7 +306,7 @@ parser.add_argument(
 )
 
 
-@pwndbg.commands.ArgparsedCommand(parser, category=CommandCategory.MEMORY)
+@pwndbg.commands.Command(parser, category=CommandCategory.MEMORY)
 @pwndbg.commands.OnlyWhenRunning
 def vmmap_add(start: int, size: int, flags: str, offset: int) -> None:
     page_flags = {
@@ -334,7 +334,7 @@ parser.add_argument(
 )
 
 
-@pwndbg.commands.ArgparsedCommand(parser, category=CommandCategory.MEMORY)
+@pwndbg.commands.Command(parser, category=CommandCategory.MEMORY)
 @pwndbg.commands.OnlyWhenRunning
 def vmmap_explore(address: int) -> None:
     if not isinstance(address, int):
@@ -357,7 +357,7 @@ def vmmap_explore(address: int) -> None:
     print(page)
 
 
-@pwndbg.commands.ArgparsedCommand(
+@pwndbg.commands.Command(
     "Clear the vmmap cache.", category=CommandCategory.MEMORY
 )  # TODO is this accurate?
 @pwndbg.commands.OnlyWhenRunning
@@ -374,7 +374,7 @@ parser.add_argument(
 )
 
 
-@pwndbg.commands.ArgparsedCommand(parser, category=CommandCategory.MISC)
+@pwndbg.commands.Command(parser, category=CommandCategory.MISC)
 @pwndbg.commands.OnlyWhenRunning
 def vmmap_load(filename) -> None:
     if filename is None:

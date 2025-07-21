@@ -1,3 +1,7 @@
+"""
+Text colorizing and theme configuration logic.
+"""
+
 from __future__ import annotations
 
 import os
@@ -164,7 +168,7 @@ class ColorParamSpec(NamedTuple):
 class ColorConfig:
     def __init__(self, namespace: str, params: List[ColorParamSpec]) -> None:
         self._namespace = namespace
-        self._params: Dict[str, Parameter] = {}
+        self._params: Dict[str, theme.ColorParameter] = {}
         for param in params:
             self._params[param.name] = theme.add_color_param(
                 f"{self._namespace}-{param.name}-color", param.default, param.doc
@@ -173,7 +177,7 @@ class ColorConfig:
     def __getattr__(self, attr: str) -> Callable[[str], str]:
         param_name = attr.replace("_", "-")
         if param_name in self._params:
-            return generateColorFunction(self._params[param_name])
+            return self._params[param_name].color_function
 
         raise AttributeError(f"ColorConfig object for {self._namespace} has no attribute '{attr}'")
 

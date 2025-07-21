@@ -21,8 +21,9 @@ from typing_extensions import ParamSpec
 
 import pwndbg
 import pwndbg.aglib.arch
-import pwndbg.aglib.disasm
+import pwndbg.aglib.disasm.disassembly
 import pwndbg.aglib.nearpc
+import pwndbg.aglib.qemu
 import pwndbg.aglib.regs
 import pwndbg.aglib.symbol
 import pwndbg.arguments
@@ -156,7 +157,7 @@ config_clear_screen = pwndbg.config.add_param(
     "context-clear-screen", False, "whether to clear the screen before printing the context"
 )
 config_output = pwndbg.config.add_param(
-    "context-output", "stdout", 'where pwndbg should output ("stdout" or file/tty).'
+    "context-output", "stdout", 'where Pwndbg should output ("stdout" or file/tty)'
 )
 config_context_sections = pwndbg.config.add_param(
     "context-sections",
@@ -299,7 +300,7 @@ parser.add_argument(
     help="The section which is to be configured. ('regs', 'disasm', 'code', 'stack', 'backtrace', 'ghidra', 'args', 'threads', 'heap_tracker', 'expressions', and/or 'last_signal')",
 )
 parser.add_argument("path", type=str, help="The path to which the output is written")
-parser.add_argument("clearing", type=bool, help="Indicates weather to clear the output")
+parser.add_argument("clearing", type=bool, help="Indicates whether to clear the output")
 banner_arg = parser.add_argument(
     "banner",
     type=str,
@@ -316,7 +317,7 @@ parser.add_argument(
 )
 
 
-@pwndbg.commands.ArgparsedCommand(parser, aliases=["ctx-out"], category=CommandCategory.CONTEXT)
+@pwndbg.commands.Command(parser, aliases=["ctx-out"], category=CommandCategory.CONTEXT)
 def contextoutput(section, path, clearing, banner="both", width: int = None):
     if not banner:  # synonym for splitmind backwards compatibility
         banner = "none"
@@ -438,7 +439,7 @@ parser.add_argument(
 )
 
 
-@pwndbg.commands.ArgparsedCommand(parser, aliases=["ctxp"], category=CommandCategory.CONTEXT)
+@pwndbg.commands.Command(parser, aliases=["ctxp"], category=CommandCategory.CONTEXT)
 def contextprev(count) -> None:
     global selected_history_index
     if not context_history:
@@ -463,7 +464,7 @@ parser.add_argument(
 )
 
 
-@pwndbg.commands.ArgparsedCommand(parser, aliases=["ctxn"], category=CommandCategory.CONTEXT)
+@pwndbg.commands.Command(parser, aliases=["ctxn"], category=CommandCategory.CONTEXT)
 def contextnext(count) -> None:
     global selected_history_index
     if not context_history:
@@ -495,7 +496,7 @@ parser.add_argument(
 )
 
 
-@pwndbg.commands.ArgparsedCommand(parser, aliases=["ctxsearch"], category=CommandCategory.CONTEXT)
+@pwndbg.commands.Command(parser, aliases=["ctxsearch"], category=CommandCategory.CONTEXT)
 def contextsearch(needle, section) -> None:
     if not section:
         sections = context_history.keys()
@@ -542,7 +543,6 @@ def contextsearch(needle, section) -> None:
 expressions = []
 
 parser = argparse.ArgumentParser(
-    formatter_class=argparse.RawTextHelpFormatter,
     description="""
 Adds an expression to be shown on context.
 
@@ -564,8 +564,20 @@ parser.add_argument(
 )
 
 
-@pwndbg.commands.ArgparsedCommand(
-    parser, aliases=["ctx-watch", "cwatch"], category=CommandCategory.CONTEXT
+@pwndbg.commands.Command(
+    parser,
+    aliases=["ctx-watch", "cwatch"],
+    category=CommandCategory.CONTEXT,
+    examples="""
+For watching variables/expressions:
+    cwatch BUF
+    cwatch ITEMS[0]
+
+For running commands:
+    cwatch execute "ds BUF"
+    cwatch execute "x/20x $rsp"
+    cwatch execute "info args"
+    """,
 )
 def contextwatch(expression, cmd) -> None:
     expressions.append((expression, cmd))
@@ -577,7 +589,7 @@ parser = argparse.ArgumentParser(
 parser.add_argument("num", type=int, help="The expression number to be removed from context")
 
 
-@pwndbg.commands.ArgparsedCommand(
+@pwndbg.commands.Command(
     parser, aliases=["ctx-unwatch", "cunwatch"], category=CommandCategory.CONTEXT
 )
 def contextunwatch(num) -> None:
@@ -661,7 +673,14 @@ def context_ghidra(target=sys.stdout, with_banner=True, width=None):
 
 
 parser = argparse.ArgumentParser(
-    description="Print out the current register, instruction, and stack context."
+    description="""
+Print out the currently enabled context sections.
+
+This is the text that gets printed on every stop. It can be useful
+to run this command manually when you change some process/debugger
+state but don't want to step/continue (e.g. after using the `down`
+and `up` commands).
+"""
 )
 parser.add_argument(
     "subcontext",
@@ -686,7 +705,21 @@ parser.add_argument(
 )
 
 
-@pwndbg.commands.ArgparsedCommand(parser, aliases=["ctx"], category=CommandCategory.CONTEXT)
+@pwndbg.commands.Command(
+    parser,
+    aliases=["ctx"],
+    category=CommandCategory.CONTEXT,
+    notes="""
+To see more commands related to context control run:
+```
+pwndbg -c context
+```
+To see context configuration run:
+```
+config context
+```
+""",
+)
 def context(subcontext=None, enabled=None) -> None:
     """
     Print out the current register, instruction, and stack context.
@@ -892,7 +925,7 @@ parser = argparse.ArgumentParser(description="Print out all registers and enhanc
 parser.add_argument("regs", nargs="*", type=str, default=None, help="Registers to be shown")
 
 
-@pwndbg.commands.ArgparsedCommand(parser, category=CommandCategory.CONTEXT)
+@pwndbg.commands.Command(parser, category=CommandCategory.CONTEXT)
 @pwndbg.commands.OnlyWhenRunning
 def regs(regs=[]) -> None:
     """Print out all registers and enhance the information."""
@@ -903,8 +936,86 @@ pwndbg.config.add_param("show-flags", False, "whether to show flags registers")
 pwndbg.config.add_param("show-retaddr-reg", True, "whether to show return address register")
 
 
+class RegisterContext:
+    changed: List[str]
+
+    def __init__(self):
+        self.changed = pwndbg.aglib.regs.changed
+
+    def get_prefix(self, reg):
+        # Make the register stand out and give a color if changed
+        regname = C.register(reg.ljust(4).upper())
+        if reg in self.changed:
+            regname = C.register_changed(regname)
+
+        # Show a marker next to the register if it changed
+        change_marker = f"{C.config_register_changed_marker}"
+        m = (
+            " " * len(change_marker)
+            if reg not in self.changed
+            else C.register_changed(change_marker)
+        )
+        return f"{m}{regname}"
+
+    def get_register_value(self, reg):
+        val = pwndbg.aglib.regs[reg]
+        if val is None:
+            print(message.warn(f"Unknown register: {reg!r}"))
+            return None
+        return val
+
+    def flag_register_context(self, reg, bit_flags):
+        val = self.get_register_value(reg)
+        if val is None:
+            return None
+        desc = C.format_flags(val, bit_flags, pwndbg.aglib.regs.last.get(reg, 0))
+        prefix = self.get_prefix(reg)
+        return f"{prefix} {desc}"
+
+    def segment_registers_context(self, regs):
+        result = ""
+        for reg in regs:
+            val = self.get_register_value(reg)
+            if val is None:
+                continue
+            prefix = self.get_prefix(reg)
+            result += f"{prefix} {hex(val)}   "
+        return result
+
+    def addressing_register_context(self, reg, is_virtual):
+        if is_virtual:
+            return self.register_context_default(reg)
+        val = self.get_register_value(reg)
+        if val is None:
+            return None
+        prefix = self.get_prefix(reg)
+        desc = hex(val)
+        if pwndbg.aglib.kernel.has_debug_syms():
+            # TODO: phys_to_virt is bugged when kaslr is enabled, ptrace_scope is enabled, or if symbols are not present
+            try:
+                virtual = pwndbg.aglib.kernel.phys_to_virt(val)
+                desc += f" [virtual: {pwndbg.chain.format(virtual)}]"
+            except Exception:
+                print(
+                    message.error(
+                        "error when running phys_to_virt, try running `echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope`"
+                    )
+                )
+        return f"{prefix} {desc}"
+
+    def register_context_default(self, reg):
+        val = self.get_register_value(reg)
+        if val is None:
+            return None
+        desc = pwndbg.chain.format(val)
+        prefix = self.get_prefix(reg)
+        return f"{prefix} {desc}"
+
+
 def get_regs(regs: List[str] = None):
+    regs: List[Any] = regs
     result = []
+    rc = RegisterContext()
 
     if regs is None:
         regs = []
@@ -920,42 +1031,39 @@ def get_regs(regs: List[str] = None):
 
         regs.append(pwndbg.aglib.regs.current.pc)
 
+        if pwndbg.aglib.qemu.is_qemu_kernel() and pwndbg.aglib.regs.kernel is not None:
+            controls = pwndbg.aglib.regs.kernel.controls
+            if controls is not None:
+                for regname, control in controls.items():
+                    control.update(regname)
+                    regs.append(control)
+            msrs = pwndbg.aglib.regs.kernel.msrs
+            if msrs is not None:
+                for regname, msr in msrs.items():
+                    msr.update(regname)
+                    regs.append(msr)
         if pwndbg.config.show_flags:
-            regs += pwndbg.aglib.regs.flags.keys()
-
-    changed = pwndbg.aglib.regs.changed
+            flags = pwndbg.aglib.regs.flags
+            if flags is not None:
+                for regname, flag in flags.items():
+                    flag.update(regname)
+                    regs.append(flag)
+        if pwndbg.aglib.qemu.is_qemu_kernel() and pwndbg.aglib.regs.kernel is not None:
+            if pwndbg.aglib.regs.kernel.segments is not None:
+                regs.append(pwndbg.aglib.regs.kernel.segments)
 
     for reg in regs:
         if reg is None:
             continue
+        if not isinstance(reg, str):
+            desc = reg.context(rc)
+            if desc is not None:
+                result.append(desc)
+                continue
+        desc = rc.register_context_default(reg)
+        if desc is not None:
+            result.append(desc)
 
-        value = pwndbg.aglib.regs[reg]
-        if value is None:
-            print(message.warn(f"Unknown register: {reg!r}"))
-            continue
-
-        # Make the register stand out and give a color if changed
-        regname = C.register(reg.ljust(4).upper())
-        if reg in changed:
-            regname = C.register_changed(regname)
-
-        # Show a dot next to the register if it changed
-        change_marker = f"{C.config_register_changed_marker}"
-        m = " " * len(change_marker) if reg not in changed else C.register_changed(change_marker)
-
-        bit_flags = None
-        if reg in pwndbg.aglib.regs.flags:
-            bit_flags = pwndbg.aglib.regs.flags[reg]
-        elif reg in pwndbg.aglib.regs.extra_flags:
-            bit_flags = pwndbg.aglib.regs.extra_flags[reg]
-
-        if bit_flags:
-            desc = C.format_flags(value, bit_flags, pwndbg.aglib.regs.last.get(reg, 0))
-
-        else:
-            desc = pwndbg.chain.format(value)
-
-        result.append(f"{m}{regname} {desc}")
     return result
 
 
@@ -981,14 +1089,15 @@ def try_emulate_if_bug_disable(handler: Callable[[], T]) -> T:
 @serve_context_history
 def context_disasm(target=sys.stdout, with_banner=True, width=None):
     flavor = pwndbg.dbg.x86_disassembly_flavor()
-    syntax = pwndbg.aglib.disasm.CapstoneSyntax[flavor]
+    syntax = pwndbg.aglib.disasm.disassembly.CapstoneSyntax[flavor]
 
     # Get the Capstone object to set disassembly syntax
-    cs = next(iter(pwndbg.aglib.disasm.get_disassembler_cached.cache.values()), None)
+    cs = next(iter(pwndbg.aglib.disasm.disassembly.get_disassembler.cache.values()), None)
 
     # The `None` case happens when the cache was not filled yet (see e.g. #881)
     if cs is not None and cs.syntax != syntax:
         pwndbg.lib.cache.clear_caches()
+        pwndbg.aglib.disasm.disassembly.computed_instruction_cache.clear()
 
     result = try_emulate_if_bug_disable(
         lambda: pwndbg.aglib.nearpc.nearpc(
@@ -1204,7 +1313,7 @@ def context_backtrace(with_banner=True, target=sys.stdout, width=None):
 
 @serve_context_history
 def context_args(with_banner=True, target=sys.stdout, width=None):
-    args = pwndbg.arguments.format_args(pwndbg.aglib.disasm.one())
+    args = pwndbg.arguments.format_args(pwndbg.aglib.disasm.disassembly.one())
 
     # early exit to skip section if no arg found
     if not args:
