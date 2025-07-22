@@ -8,6 +8,7 @@ import pwndbg
 import pwndbg.aglib.memory
 import pwndbg.aglib.symbol
 import pwndbg.aglib.typeinfo
+import pwndbg.color.message as M
 from pwndbg.aglib import kernel
 from pwndbg.aglib.kernel.macros import compound_head
 from pwndbg.aglib.kernel.macros import for_each_entry
@@ -87,19 +88,48 @@ class Freelist:
         self.random = random
 
     def __iter__(self) -> Generator[int, None, None]:
+        seen: set[int] = set()
         current_object = self.start_addr
         while current_object:
-            addr = int(current_object)
+            try:
+                addr = int(current_object)
+            except Exception:
+                print(
+                    M.warn(
+                        f"Corrupted slab freelist detected at {hex(current_object)} when length is {len(seen)}"
+                    )
+                )
+                break
             yield current_object
-            current_object = pwndbg.aglib.memory.pvoid(addr + self.offset)
+            current_object = pwndbg.aglib.memory.read_pointer_width(addr + self.offset)
             if self.random:
                 current_object ^= self.random ^ swab(addr + self.offset)
+            if addr in seen:
+                # this can happen during exploit dev
+                print(
+                    M.warn(
+                        f"Cyclic slab freelist detected at {hex(addr)} when length is {len(seen)}"
+                    )
+                )
+                break
+            seen.add(addr)
 
     def __int__(self) -> int:
         return self.start_addr
 
     def __len__(self) -> int:
-        return sum(1 for _ in self)
+        seen: set[int] = set()
+        for addr in self:
+            if addr in seen:
+                # this can happen during exploit dev
+                print(
+                    M.warn(
+                        f"Cyclic slab freelist detected at {hex(addr)} when length is {len(seen)}"
+                    )
+                )
+                break
+            seen.add(addr)
+        return len(seen)
 
     def find_next(self, addr: int) -> int:
         freelist_iter = iter(self)
@@ -127,12 +157,6 @@ class SlabCache:
 
     @property
     def random(self) -> int:
-        if not kernel.kconfig():
-            try:
-                return int(self._slab_cache["random"])
-            except pwndbg.dbg_mod.Error:
-                return 0
-
         return (
             int(self._slab_cache["random"]) if "SLAB_FREELIST_HARDENED" in kernel.kconfig() else 0
         )
@@ -140,6 +164,10 @@ class SlabCache:
     @property
     def size(self) -> int:
         return int(self._slab_cache["size"])
+
+    @property
+    def slab_size(self) -> int:
+        return 0x1000 << self.oo_order
 
     @property
     def object_size(self) -> int:
@@ -178,8 +206,43 @@ class SlabCache:
         return int(self._slab_cache["cpu_partial"])
 
     @property
+    def cpu_partial_slabs(self) -> int:
+        if self._slab_cache.dereference().type.has_field("cpu_partial_slabs"):
+            return int(self._slab_cache["cpu_partial_slabs"])
+        return None
+
+    @property
+    def min_partial(self) -> int:
+        return int(self._slab_cache["min_partial"])
+
+    @property
     def inuse(self) -> int:
-        return int(self._slab_cache["inuse"])
+        # somewhat mirrors libslub's implementation
+        # looks for per_cpu active lists and per_cpu and node partial lists
+        # no good way to track full slabs unless CONFIG_SLUB_DEBUG is enabled
+        #       which is typically not from what I have seen
+        cnt = 0
+        for cpu_cache in self.cpu_caches:
+            if cpu_cache.active_slab is not None:
+                cnt += cpu_cache.active_slab.inuse
+            for partial_slab in cpu_cache.partial_slabs:
+                cnt += partial_slab.inuse
+        for node_cache in self.node_caches:
+            for partial_slab in node_cache.partial_slabs:
+                cnt += partial_slab.inuse
+        return cnt
+
+    @property
+    def useroffset(self) -> int:
+        if not self._slab_cache.dereference().type.has_field("useroffset"):
+            return None
+        return int(self._slab_cache["useroffset"])
+
+    @property
+    def usersize(self) -> int:
+        if not self._slab_cache.dereference().type.has_field("usersize"):
+            return None
+        return int(self._slab_cache["usersize"])
 
     @property
     def __oo_x(self) -> int:
@@ -192,6 +255,20 @@ class SlabCache:
     @property
     def oo_objects(self):
         return oo_objects(self.__oo_x)
+
+    def find_containing_slab(self, address) -> Slab | None:
+        for cpu_cache in self.cpu_caches:
+            slab = cpu_cache.active_slab
+            if slab is not None and address in slab:
+                return slab
+            for slab in cpu_cache.partial_slabs:
+                if slab is not None and address in slab:
+                    return slab
+        for node_cache in self.node_caches:
+            for slab in node_cache.partial_slabs:
+                if slab is not None and address in slab:
+                    return slab
+        return None
 
 
 class CpuCache:
@@ -218,7 +295,7 @@ class CpuCache:
         _slab = self._cpu_cache[slab_key]
         if not int(_slab):
             return None
-        return Slab(_slab.dereference(), self, self.slab_cache)
+        return Slab(_slab.dereference(), self, None)
 
     @property
     def partial_slabs(self) -> List[Slab]:
@@ -227,7 +304,7 @@ class CpuCache:
         cur_slab_int = int(cur_slab)
         while cur_slab_int:
             _slab = cur_slab.dereference()
-            partial_slabs.append(Slab(_slab, self, self.slab_cache, is_partial=True))
+            partial_slabs.append(Slab(_slab, self, None, is_partial=True))
             cur_slab = _slab["next"]
             cur_slab_int = int(cur_slab)
         return partial_slabs
@@ -249,8 +326,16 @@ class NodeCache:
         for slab in for_each_entry(
             self._node_cache["partial"], f"struct {slab_struct_type()}", "slab_list"
         ):
-            ret.append(Slab(slab.dereference(), None, self.slab_cache, is_partial=True))
+            ret.append(Slab(slab.dereference(), None, self, is_partial=True))
         return ret
+
+    @property
+    def nr_partial(self) -> int:
+        return int(self._node_cache["nr_partial"])
+
+    @property
+    def min_partial(self) -> int:
+        return self.slab_cache.min_partial
 
 
 class Slab:
@@ -258,13 +343,21 @@ class Slab:
         self,
         slab: pwndbg.dbg_mod.Value,
         cpu_cache: CpuCache | None,
-        slab_cache: SlabCache,
+        node_cache: NodeCache | None,
         is_partial: bool = False,
     ) -> None:
         self._slab = slab
         self.cpu_cache = cpu_cache
-        self.slab_cache = slab_cache
+        self.node_cache = node_cache
         self.is_partial = is_partial
+        self.is_cpu = False
+        self.slab_cache = None
+        if cpu_cache is not None:
+            self.is_cpu = True
+            self.slab_cache = cpu_cache.slab_cache
+            assert node_cache is None
+        if node_cache is not None:
+            self.slab_cache = node_cache.slab_cache
 
     @property
     def slab_address(self) -> int:
@@ -333,6 +426,9 @@ class Slab:
     @property
     def free_objects(self) -> Set[int]:
         return {obj for freelist in self.freelists for obj in freelist}
+
+    def __contains__(self, addr: int):
+        return self.virt_address <= addr < self.virt_address + self.slab_cache.slab_size
 
 
 def find_containing_slab_cache(addr: int) -> SlabCache | None:

@@ -29,7 +29,8 @@ import pwndbg.color.message as M
 import pwndbg.lib.memory
 from pwndbg.aglib import load_aglib
 from pwndbg.dbg import selection
-from pwndbg.lib.arch import PWNDBG_SUPPORTED_ARCHITECTURES_TYPE
+from pwndbg.lib.arch import ArchDefinition
+from pwndbg.lib.arch import Platform
 from pwndbg.lib.regs import reg_sets
 
 T = TypeVar("T")
@@ -52,33 +53,6 @@ def rename_register(name: str, proc: LLDBProcess) -> str:
 
     # Nothing to change.
     return name
-
-
-class LLDBArch(pwndbg.dbg_mod.Arch):
-    def __init__(
-        self,
-        name: PWNDBG_SUPPORTED_ARCHITECTURES_TYPE,
-        ptrsize: int,
-        endian: Literal["little", "big"],
-    ):
-        self._endian = endian
-        self._name: PWNDBG_SUPPORTED_ARCHITECTURES_TYPE = name
-        self._ptrsize = ptrsize
-
-    @override
-    @property
-    def endian(self) -> Literal["little", "big"]:
-        return self._endian
-
-    @override
-    @property
-    def name(self) -> PWNDBG_SUPPORTED_ARCHITECTURES_TYPE:
-        return self._name
-
-    @override
-    @property
-    def ptrsize(self) -> int:
-        return self._ptrsize
 
 
 class LLDBRegisters(pwndbg.dbg_mod.Registers):
@@ -553,7 +527,12 @@ class LLDBValue(pwndbg.dbg_mod.Value):
 
     @override
     def string(self) -> str:
-        addr = self.inner.unsigned
+        if self.inner.type.IsArrayType():
+            # Array types need to have their address taken in LLDB.
+            addr = self.inner.AddressOf().unsigned
+        else:
+            addr = self.inner.unsigned
+
         error = lldb.SBError()
 
         # Read strings up to 4GB.
@@ -660,16 +639,12 @@ class LLDBValue(pwndbg.dbg_mod.Value):
 
 class LLDBMemoryMap(pwndbg.dbg_mod.MemoryMap):
     def __init__(self, pages: List[pwndbg.lib.memory.Page]):
-        self.pages = pages
+        super().__init__(pages)
 
     @override
     def is_qemu(self) -> bool:
         # TODO/FIXME: Figure a way to detect QEMU later.
         return False
-
-    @override
-    def ranges(self) -> List[pwndbg.lib.memory.Page]:
-        return self.pages
 
 
 class LLDBStopPoint(pwndbg.dbg_mod.StopPoint):
@@ -728,9 +703,11 @@ class YieldContinue:
     """
 
     target: LLDBStopPoint
+    selected_thread: bool
 
-    def __init__(self, target: LLDBStopPoint):
+    def __init__(self, target: LLDBStopPoint, selected_thread: bool = False):
         self.target = target
+        self.selected_thread = selected_thread
 
 
 class YieldSingleStep:
@@ -754,6 +731,11 @@ class LLDBExecutionController(pwndbg.dbg_mod.ExecutionController):
     def cont(self, target: pwndbg.dbg_mod.StopPoint) -> Awaitable[None]:
         assert isinstance(target, LLDBStopPoint)
         return OneShotAwaitable(YieldContinue(target))
+
+    @override
+    def cont_selected_thread(self, target: pwndbg.dbg_mod.StopPoint) -> Awaitable[None]:
+        assert isinstance(target, LLDBStopPoint)
+        return OneShotAwaitable(YieldContinue(target, selected_thread=True))
 
 
 # Our execution controller doesn't need to change between uses, as all the state
@@ -1473,7 +1455,7 @@ class LLDBProcess(pwndbg.dbg_mod.Process):
         return [LLDBType(types.GetTypeAtIndex(i)) for i in range(types.GetSize())]
 
     @override
-    def arch(self) -> pwndbg.dbg_mod.Arch:
+    def arch(self) -> ArchDefinition:
         endian0 = self.process.GetByteOrder()
         endian1 = self.target.GetByteOrder()
 
@@ -1538,6 +1520,9 @@ class LLDBProcess(pwndbg.dbg_mod.Process):
         elif name == "arm64":
             # Apple uses a different name for AArch64 than we do.
             name = "aarch64"
+        elif name == "arm64e":
+            # Apple uses a different name for AArch64 than we do.
+            name = "aarch64"
         elif name == "riscv32":
             # Pwndbg use a different name for riscv32.
             name = "rv32"
@@ -1545,7 +1530,7 @@ class LLDBProcess(pwndbg.dbg_mod.Process):
             # Pwndbg use a different name for riscv64.
             name = "rv64"
 
-        return LLDBArch(name, ptrsize0, endian)
+        return ArchDefinition(name=name, ptrsize=ptrsize0, endian=endian, platform=Platform.LINUX)
 
     @override
     def break_at(
@@ -2012,7 +1997,7 @@ class LLDB(pwndbg.dbg_mod.Debugger):
         if ty not in self.event_handlers:
             # No one cares about this event type.
             return
-        if self.suspended_events[ty]:
+        if self.suspended_events[ty] or self.suspended_events[pwndbg.dbg_mod.EventType.SUSPEND_ALL]:
             # This event has been suspended.
             return
 
@@ -2020,9 +2005,9 @@ class LLDB(pwndbg.dbg_mod.Debugger):
             try:
                 handler()
             except Exception as e:
-                import pwndbg.exception
+                from pwndbg.exception import handle as pwndbg_exception
 
-                pwndbg.exception.handle()
+                pwndbg_exception()
                 raise e
 
     @override

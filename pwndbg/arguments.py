@@ -1,6 +1,8 @@
 """
-Allows describing functions, specifically enumerating arguments which
-may be passed in a combination of registers and stack values.
+Function and syscall argument formatting.
+
+Enumerates arguments which may be passed in a combination of
+registers and stack values.
 """
 
 from __future__ import annotations
@@ -11,8 +13,8 @@ from typing import Tuple
 from capstone import CS_GRP_INT
 
 import pwndbg.aglib.arch
-import pwndbg.aglib.disasm
 import pwndbg.aglib.disasm.arch
+import pwndbg.aglib.disasm.disassembly
 import pwndbg.aglib.file
 import pwndbg.aglib.memory
 import pwndbg.aglib.proc
@@ -26,12 +28,13 @@ import pwndbg.lib.funcparser
 import pwndbg.lib.functions
 from pwndbg.aglib.disasm.instruction import PwndbgInstruction
 from pwndbg.aglib.nearpc import c as N
+from pwndbg.lib.functions import format_flags_argument
 
 
 def get(instruction: PwndbgInstruction) -> List[Tuple[pwndbg.lib.functions.Argument, int]]:
     """
     Returns an array containing the arguments to the current function,
-    if $pc is a 'call', 'bl', or 'jalr' type instruction.
+    if $pc is a function call or syscall instruction.
 
     Otherwise, returns None.
     """
@@ -44,9 +47,9 @@ def get(instruction: PwndbgInstruction) -> List[Tuple[pwndbg.lib.functions.Argum
         return []
 
     if instruction.call_like:
-        try:
-            abi = pwndbg.lib.abi.ABI.default()
-        except KeyError:
+        abi = pwndbg.aglib.arch.function_abi
+
+        if abi is None:
             return []
 
         target = instruction.target
@@ -60,10 +63,10 @@ def get(instruction: PwndbgInstruction) -> List[Tuple[pwndbg.lib.functions.Argum
     elif CS_GRP_INT in instruction.groups:
         # Get the syscall number and name
         name = instruction.syscall_name
-        abi = pwndbg.lib.abi.ABI.syscall()
+        abi = pwndbg.aglib.arch.syscall_abi
         target = None
 
-        if name is None:
+        if name is None or abi is None:
             return []
     else:
         return []
@@ -112,8 +115,7 @@ def get(instruction: PwndbgInstruction) -> List[Tuple[pwndbg.lib.functions.Argum
     return result
 
 
-def argname(n: int, abi: pwndbg.lib.abi.ABI | None = None) -> str:
-    abi = abi or pwndbg.lib.abi.ABI.default()
+def argname(n: int, abi: pwndbg.lib.abi.ABI) -> str:
     regs = abi.register_arguments
 
     if n < len(regs):
@@ -128,7 +130,11 @@ def argument(n: int, abi: pwndbg.lib.abi.ABI | None = None) -> int:
     instruction.
     Works only for ABIs that use registers for arguments.
     """
-    abi = abi or pwndbg.lib.abi.ABI.default()
+    abi = abi or pwndbg.aglib.arch.function_abi
+    if abi is None:
+        raise pwndbg.dbg_mod.Error(
+            f"Function ABI not defined for current architecture, {pwndbg.aglib.arch.function_abi}"
+        )
     regs = abi.register_arguments
 
     if n < len(regs):
@@ -138,7 +144,7 @@ def argument(n: int, abi: pwndbg.lib.abi.ABI | None = None) -> int:
 
     sp = pwndbg.aglib.regs.sp + (n * pwndbg.aglib.arch.ptrsize)
 
-    return int(pwndbg.aglib.memory.get_typed_pointer_value(pwndbg.aglib.typeinfo.ppvoid, sp))
+    return pwndbg.aglib.memory.read_pointer_width(sp)
 
 
 def arguments(abi: pwndbg.lib.abi.ABI | None = None):
@@ -146,21 +152,45 @@ def arguments(abi: pwndbg.lib.abi.ABI | None = None):
     Yields (arg_name, arg_value) tuples for arguments from a given ABI.
     Works only for ABIs that use registers for arguments.
     """
-    abi = abi or pwndbg.lib.abi.ABI.default()
+    abi = abi or pwndbg.aglib.arch.function_abi
+    if abi is None:
+        return []
     regs = abi.register_arguments
 
     for i in range(len(regs)):
         yield argname(i, abi), argument(i, abi)
 
 
+# When an argument is named one of these in Linux syscalls/glibc, it refers to a file descriptor
+# Search for strings containing "fd" in https://chromium.googlesource.com/chromiumos/docs/+/master/constants/syscalls.md
+FILE_DESCRIPTOR_ARG_NAMES = {
+    "fd",
+    "in_fd",
+    "out_fd",
+    "fdin",
+    "fdout",
+    "oldfd",
+    "fildes",
+    "newfd",
+    "epfd",
+    "dfd",
+    "dirfd",
+    "mountdirfd",
+}
+
+
 def format_args(instruction: PwndbgInstruction) -> List[str]:
     result = []
     for arg, value in get(instruction):
         code = arg.type != "char"
-        pretty = pwndbg.chain.format(value, code=code)
+        pretty = (
+            pwndbg.chain.format(value, code=code)
+            if not arg.flags
+            else format_flags_argument(arg.flags, value)
+        )
 
         # Enhance args display
-        if arg.name == "fd" and isinstance(value, int):
+        if arg.name in FILE_DESCRIPTOR_ARG_NAMES and isinstance(value, int):
             # Cannot find PID of the QEMU program: perhaps it is in a different pid namespace or we have no permission to read the QEMU process' /proc/$pid/fd/$fd file.
             pid = pwndbg.aglib.proc.pid
             if pid is not None:

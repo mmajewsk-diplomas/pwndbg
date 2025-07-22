@@ -35,7 +35,6 @@ pwndbg.config.add_param(
     Prevents GDB crashes due to excessive memory allocation requests.
     Set to 0 for unlimited (use with caution).""",
     param_class=PARAM_ZUINTEGER,
-    scope="memory",
 )
 
 
@@ -69,7 +68,7 @@ parser.add_argument(
 )
 
 
-@pwndbg.commands.ArgparsedCommand(parser, category=CommandCategory.MEMORY)
+@pwndbg.commands.Command(parser, category=CommandCategory.MEMORY)
 @pwndbg.commands.OnlyWhenRunning
 def hexdump(address, count=pwndbg.config.hexdump_bytes) -> None:
     if hexdump.repeat:
