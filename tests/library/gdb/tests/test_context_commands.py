@@ -92,7 +92,10 @@ def test_empty_context_sections(start_binary, sections):
     # Actual test check
     gdb.execute(f"set context-sections {sections}", to_string=True)
     assert pwndbg.config.context_sections.value == ""
-    assert gdb.execute("context", to_string=True) == "Context sections are empty. You can set context-sections to the following values: args, regs, disasm, stack, backtrace, code, expressions, ghidra, heap_tracker, threads, last_signal\n"
+    assert (
+        gdb.execute("context", to_string=True)
+        == "Context sections are empty. You can set context-sections to the following values: args, regs, disasm, stack, backtrace, code, expressions, ghidra, heap_tracker, threads, last_signal\n"
+    )
 
     # Bring back old values && sanity check
     gdb.execute(f"set context-sections {default_ctx_sects}")
