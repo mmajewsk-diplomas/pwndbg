@@ -22,12 +22,6 @@ LIMITS: dict[str, int] = {
 
 parser = argparse.ArgumentParser(
     description="Set a POSIX resource limit in the debugged process.",
-    epilog="""
-Examples:
-  setrlimit core 0              # disable core dumps
-  setrlimit cpu 60              # limit CPU time to 60 seconds
-  setrlimit data infinite 1024  # infinite soft, 1024 hard data limit
-""",
 )
 parser.add_argument(
     "resource",
@@ -69,7 +63,7 @@ def _invoke_setrlimit(num: int, soft_val: int, hard_val: int) -> str:
         return result.GetOutput()
 
 
-@pwndbg.commands.ArgparsedCommand(parser, category=CommandCategory.MISC)
+@pwndbg.commands.Command(parser, category=CommandCategory.MISC)
 def setrlimit(resource: str, soft: str, hard: str | None = None) -> None:
     """
     Sets a POSIX resource limit in the debugged process.
