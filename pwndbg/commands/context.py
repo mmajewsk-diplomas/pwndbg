@@ -735,14 +735,15 @@ def context(subcontext=None, enabled=None) -> None:
         subcontext = []
     args = subcontext
 
-    # Inform when sections set to be empty
-    sections = pwndbg.config.context_sections
-    if not sections:
+    # Inform when auto-context is off
+    if not pwndbg.config.auto_context:
         print(
             message.warn(
-                "Context sections are empty. You can set context-sections to the following values: args, regs, disasm, stack, backtrace, code, expressions, ghidra, heap_tracker, threads, last_signal"
+                "Context sections are empty. You can set auto-context on."
             )
         )
+
+    handle_auto_context(pwndbg.config.auto_context)   
 
     if len(args) == 0:
         args = config_context_sections.split()
@@ -823,8 +824,15 @@ pwndbg.config.add_param("show-compact-regs-min-width", 20, "the minimum width of
 pwndbg.config.add_param(
     "show-compact-regs-separation", 4, "the number of spaces separating columns"
 )
+pwndbg.config.add_param("auto-context", True, "showing context_sections automatically after every command stop")
 
 
+def handle_auto_context(is_on):
+    if is_on:
+        pwndbg.config.context_sections.value = "regs disasm stack"
+    else:
+        pwndbg.config.context_sections.value = ""
+        
 def calculate_padding_to_align(length, align):
     """Calculates the number of spaces to append to reach the next alignment.
     The next alignment point is given by "x * align >= length".
