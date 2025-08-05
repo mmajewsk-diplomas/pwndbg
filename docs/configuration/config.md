@@ -126,6 +126,17 @@ How to determine the process to attach when multiple candidates exists.
 
 ----------
 
+## **auto-context**
+
+
+Showing context_sections automatically after every command stop.
+
+
+
+**Default:** on  
+
+----------
+
 ## **auto-explore-auxv**
 
 
