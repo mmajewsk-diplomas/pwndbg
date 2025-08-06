@@ -148,6 +148,7 @@
 -  [comm](misc/comm.md) - Put comments in assembly code.
 -  [cyclic](misc/cyclic.md) - Cyclic pattern creator/finder.
 -  [cymbol](misc/cymbol.md) - Manage custom C structures in pwndbg. Supports project-specific auto-loading from .gdbinit.
+-  [diffoutput](misc/diffoutput.md) - Compare the current output of a command to its saved version.
 -  [down](misc/down.md) - Select and print stack frame called by this one.
 -  [dt](misc/dt.md) - Dump out information on a type (e.g. ucontext_t).
 -  [dumpargs](misc/dumpargs.md) - Prints determined arguments for call/syscall instruction.
@@ -159,6 +160,7 @@
 -  [patch-revert](misc/patch-revert.md) - Revert patch at given address.
 -  [patch](misc/patch.md) - Patches given instruction with given code or bytes.
 -  [plist](misc/plist.md) - Dumps the elements of a linked list.
+-  [saveoutput](misc/saveoutput.md) - Save the output of a debugger command for later diffing.
 -  [sigreturn](misc/sigreturn.md) - Display the SigreturnFrame at the specific address
 -  [spray](misc/spray.md) - Spray memory with cyclic() generated values
 -  [tips](misc/tips.md) - Shows tips.
