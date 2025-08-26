@@ -22,9 +22,8 @@ def get_memory_map_raw() -> Tuple[pwndbg.lib.memory.Page, ...]:
     return pwndbg.aglib.kernel.vmmap.kernel_vmmap(False)
 
 
-def guess_physmap():
-    # this is mostly true
-    # https://www.kernel.org/doc/Documentation/x86/x86_64/mm.txt
+@pwndbg.lib.cache.cache_until("stop")
+def first_kernel_page_start():
     for page in get_memory_map_raw():
         if page.start and pwndbg.aglib.memory.is_kernel(page.start):
             return page.start
@@ -52,7 +51,7 @@ class ArchPagingInfo:
     pagetableptr_cache: Dict[int, pwndbg.dbg_mod.Value] = {}
 
     @property
-    @pwndbg.lib.cache.cache_until("start")
+    @pwndbg.lib.cache.cache_until("objfile")
     def STRUCT_PAGE_SIZE(self):
         a = pwndbg.aglib.typeinfo.load("struct page")
         if a is None:
@@ -61,9 +60,10 @@ class ArchPagingInfo:
         return a.sizeof
 
     @property
-    @pwndbg.lib.cache.cache_until("start")
+    @pwndbg.lib.cache.cache_until("objfile")
     def STRUCT_PAGE_SHIFT(self):
-        return int(math.log2(self.STRUCT_PAGE_SIZE))
+        # needs to be rounded up (consider the layout of vmemmap)
+        return math.ceil(math.log2(self.STRUCT_PAGE_SIZE))
 
     @property
     def page_shift(self) -> int:
@@ -155,6 +155,7 @@ class ArchPagingInfo:
 
 
 class x86_64PagingInfo(ArchPagingInfo):
+    # constants are taken from https://www.kernel.org/doc/Documentation/x86/x86_64/mm.txt
     def __init__(self):
         self.va_bits = 48 if self.paging_level == 4 else 51
         # https://blog.zolutal.io/understanding-paging/
@@ -177,16 +178,33 @@ class x86_64PagingInfo(ArchPagingInfo):
             )
         )
 
+    @pwndbg.lib.cache.cache_until("stop")
+    def get_vmalloc_vmemmap_bases(self):
+        result = None
+        try:
+            target = self.physmap.to_bytes(8, byteorder="little")
+            mapping = pwndbg.aglib.kernel.first_kernel_ro_page()
+            result = next(pwndbg.search.search(target, mappings=[mapping]), None)
+        except Exception as e:
+            print(e)
+            pass
+        vmemmap, vmalloc = None, None
+        if result is not None:
+            vmemmap = pwndbg.aglib.memory.u64(result - 0x10)
+            vmalloc = pwndbg.aglib.memory.u64(result - 0x8)
+        return vmalloc, vmemmap
+
     @property
     @pwndbg.lib.cache.cache_until("stop")
     def physmap(self):
-        pob = pwndbg.aglib.symbol.lookup_symbol_addr("page_offset_base")
-        result = None
-        if pob is not None:
-            if pwndbg.aglib.memory.peek(pob):
-                result = pwndbg.aglib.memory.u64(pob)
+        result = pwndbg.aglib.kernel.symbol.try_usymbol("page_offset_base")
         if result is None:
-            return guess_physmap()
+            result = INVALID_ADDR
+            min = 0xFFFF888000000000 if self.paging_level == 4 else 0xFF11000000000000
+            for page in get_memory_map_raw():
+                if page.start and page.start >= min:
+                    result = page.start
+                    break
         return result
 
     @property
@@ -201,45 +219,34 @@ class x86_64PagingInfo(ArchPagingInfo):
     @property
     @pwndbg.lib.cache.cache_until("stop")
     def vmalloc(self):
-        addr = pwndbg.aglib.symbol.lookup_symbol_addr("vmalloc_base")
-        if addr:
-            return pwndbg.aglib.memory.u64(addr)
-        return None
+        result = pwndbg.aglib.kernel.symbol.try_usymbol("vmalloc_base")
+        if result is not None:
+            return result
+        result, _ = self.get_vmalloc_vmemmap_bases()
+        if result is not None:
+            return result
+        # resort to default
+        return 0xFF91000000000000 if self.paging_level == 5 else 0xFFFFC88000000000
 
     @property
     @pwndbg.lib.cache.cache_until("stop")
     def vmemmap(self):
-        addr = pwndbg.aglib.symbol.lookup_symbol_addr("vmemmap_base")
-        if addr:
-            return pwndbg.aglib.memory.u64(addr)
+        result = pwndbg.aglib.kernel.symbol.try_usymbol("vmemmap_base")
+        if result is not None:
+            return result
+        _, result = self.get_vmalloc_vmemmap_bases()
+        if result is not None:
+            return result
         # resort to default
-        if self.paging_level == 5:
-            return 0xFFD4000000000000
-        return 0xFFFFEA0000000000
+        return 0xFFD4000000000000 if self.paging_level == 5 else 0xFFFFEA0000000000
 
     @property
+    @pwndbg.lib.cache.cache_until("stop")
     def paging_level(self) -> int:
-        if pwndbg.aglib.kernel.has_debug_syms():
-            # https://elixir.bootlin.com/linux/v6.2/source/arch/x86/include/asm/cpufeatures.h#L381
-            X86_FEATURE_LA57 = 16 * 32 + 16
-            feature = X86_FEATURE_LA57
-            # Separate to avoid using kconfig if possible
-            boot_cpu_data = pwndbg.aglib.symbol.lookup_symbol("boot_cpu_data")
-            assert boot_cpu_data is not None, "Symbol boot_cpu_data not exists"
-            boot_cpu_data = boot_cpu_data.dereference()
-
-            capabilities = boot_cpu_data["x86_capability"]
-            cpu_feature_capability = (int(capabilities[feature // 32]) >> (feature % 32)) & 1 == 1
-            if not cpu_feature_capability or "no5lvl" in pwndbg.aglib.kernel.kcmdline():
-                return 4
-            return 5
         # CONFIG_X86_5LEVEL is only a hint -- whether 5lvl paging is used depends on the hardware
         # see also: https://www.kernel.org/doc/html/next/x86/x86_64/mm.html
-        pages = get_memory_map_raw()
-        for page in pages:
-            if pwndbg.aglib.memory.is_kernel(page.start):
-                if page.start < (0xFFF << (4 * 13)):
-                    return 5
+        if first_kernel_page_start() < (0xFFF << (4 * 13)):
+            return 5
         return 4
 
     @pwndbg.lib.cache.cache_until("stop")
@@ -360,9 +367,9 @@ class Aarch64PagingInfo(ArchPagingInfo):
     def physmap(self):
         # addr = pwndbg.aglib.symbol.lookup_symbol_addr("memstart_addr")
         # if addr is None:
-        #     return guess_physmap()
+        #     return first_kernel_page_start()
         # return pwndbg.aglib.memory.u(addr)
-        return guess_physmap()
+        return first_kernel_page_start()
 
     @property
     @pwndbg.lib.cache.cache_until("stop")
@@ -414,16 +421,21 @@ class Aarch64PagingInfo(ArchPagingInfo):
     @pwndbg.lib.cache.cache_until("stop")
     def vmemmap(self):
         if self.kversion is None:
-            return None
+            return INVALID_ADDR
         if self.kversion >= (6, 9):
             # https://elixir.bootlin.com/linux/v6.16-rc2/source/arch/arm64/include/asm/memory.h#L33
-            return (-0x40000000 % INVALID_ADDR) - self.VMEMMAP_SIZE
-        if self.kversion >= (5, 11):
+            result = (-0x40000000 % INVALID_ADDR) - self.VMEMMAP_SIZE
+        elif self.kversion >= (5, 11):
             # Linux 5.11 changed the calculation for VMEMMAP_START
             # https://elixir.bootlin.com/linux/v5.11/source/arch/arm64/include/asm/memory.h#L53
             VMEMMAP_SHIFT = self.page_shift - self.STRUCT_PAGE_SHIFT
-            return -(1 << (self.va_bits - VMEMMAP_SHIFT)) % INVALID_ADDR
-        return (-self.VMEMMAP_SIZE - 2 * 1024 * 1024) + 2**64
+            result = -(1 << (self.va_bits - VMEMMAP_SHIFT)) % INVALID_ADDR
+        else:
+            result = (-self.VMEMMAP_SIZE - 2 * 1024 * 1024) + 2**64
+        for page in get_memory_map_raw():
+            if page.start >= result:
+                return page.start
+        return INVALID_ADDR
 
     @property
     @pwndbg.lib.cache.cache_until("stop")
@@ -474,7 +486,7 @@ class Aarch64PagingInfo(ArchPagingInfo):
         raise NotImplementedError()
 
     @property
-    @pwndbg.lib.cache.cache_until("stop")
+    @pwndbg.lib.cache.cache_until("forever")
     def paging_level(self):
         # https://www.kernel.org/doc/html/v5.3/arm64/memory.html
         if self.page_shift == 16:
