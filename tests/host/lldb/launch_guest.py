@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import os
+import shlex
 import sys
 from enum import Enum
 from pathlib import Path
 from typing import Any
 from typing import Callable
 from typing import Coroutine
+from typing import Dict
 from typing import List
 
 
@@ -25,15 +27,44 @@ async def _run(ctrl: Any, outer: Callable[..., Coroutine[Any, Any, None]]) -> No
         def __init__(self, pc: PwndbgController):
             self.pc = pc
 
-        async def launch(self, binary: Path) -> None:
+        async def launch(
+            self, binary: Path, args: List[str] = [], env: Dict[str, str] = {}
+        ) -> None:
+            await self.pc.execute("set context-reserve-lines never")
             await self.pc.execute(f"target create {binary}")
-            await self.pc.execute("process launch -s")
+            env_args = " ".join((f"-E{k}={v}" for k, v in env.items()))
+            await self.pc.execute(
+                f"process launch -A true {env_args} -s -- "
+                + " ".join(shlex.quote(arg) for arg in args)
+            )
+
+        async def cont(self) -> None:
+            await self.pc.execute("continue")
+
+        async def execute(self, command: str) -> None:
+            await self.pc.execute(command)
+
+        async def execute_and_capture(self, command: str) -> str:
+            return (await self.pc.execute_and_capture(command)).decode(
+                "utf-8", errors="surrogateescape"
+            )
+
+        async def step_instruction(self) -> None:
+            await self.pc.execute("thread step-inst")
+
+        async def finish(self) -> None:
+            await self.pc.execute("thread step-out")
+
+        async def select_thread(self, tid: int) -> None:
+            await self.pc.execute(f"thread select {tid}")
 
     await outer(_LLDBController(ctrl))
 
 
 def run(pytest_args: List[str], pytest_plugins: List[Any] | None) -> int:
     # The import path is set up before this function is called.
+    os.environ["NO_COLOR"] = "1"
+
     from pwndbginit import pwndbg_lldb
 
     from ... import host
@@ -41,7 +72,7 @@ def run(pytest_args: List[str], pytest_plugins: List[Any] | None) -> int:
 
     # Replace host.start with a proper implementation of the start command.
     def _start(outer: Callable[[Controller], Coroutine[Any, Any, None]]) -> None:
-        pwndbg_lldb.launch(_run, outer, debug=True)
+        pwndbg_lldb.launch(_run, outer, debug=False)
 
     host.start = _start
 
@@ -71,6 +102,8 @@ class CollectTestFunctionNames:
 
 
 if __name__ == "__main__":
+    sys._pwndbg_unittest_run = True  # type: ignore[attr-defined]
+
     # Prepare the requested operation.
     op = Operation(os.environ["TEST_OPERATION"])
     match op:

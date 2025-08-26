@@ -8,6 +8,7 @@ from typing import Any
 from typing import Awaitable
 from typing import Callable
 from typing import Coroutine
+from typing import Dict
 from typing import List
 
 
@@ -149,10 +150,56 @@ class TestHost:
 
 
 class Controller:
-    def launch(self, binary: Path) -> Awaitable[None]:
+    def launch(
+        self, binary: Path, args: List[str] = [], env: Dict[str, str] = {}
+    ) -> Awaitable[None]:
         """
         Launch the binary with the given path, relative to the binaries folder
         for the calling test.
+        """
+        raise NotImplementedError()
+
+    def execute_and_capture(self, command: str) -> Awaitable[str]:
+        """
+        Execute the given command and capture its output.
+
+        While this method is capable of executing any command supported by the
+        debugger, in with keeping tests debugger-agnostic, is should only ever
+        be used to invoke Pwndbg commands.
+        """
+        raise NotImplementedError()
+
+    def execute(self, command: str) -> Awaitable[None]:
+        """
+        Execute the given command.
+
+        While this method is capable of executing any command supported by the
+        debugger, in with keeping tests debugger-agnostic, is should only ever
+        be used to invoke Pwndbg commands.
+        """
+        raise NotImplementedError()
+
+    def cont(self) -> Awaitable[None]:
+        """
+        Resume execution until the next stop event.
+        """
+        raise NotImplementedError()
+
+    def step_instruction(self) -> Awaitable[None]:
+        """
+        Perform a step in the scope of a single instruction.
+        """
+        raise NotImplementedError()
+
+    def finish(self) -> Awaitable[None]:
+        """
+        Resume execution; stop after the current function returns.
+        """
+        raise NotImplementedError()
+
+    def select_thread(self, tid: int) -> Awaitable[None]:
+        """
+        Select the thread with the given ID.
         """
         raise NotImplementedError()
 

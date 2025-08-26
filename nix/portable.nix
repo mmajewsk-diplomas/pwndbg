@@ -55,13 +55,29 @@ let
       export PATH="$dir/bin/:$PATH"
     '';
 
+  macosQuarantine = lib.optionalString pkgs.stdenv.isDarwin ''
+    libpython="libpython${python3.pythonVersion}.dylib"
+
+    if command -v xattr >/dev/null 2>&1 && command -v grep >/dev/null 2>&1; then
+      if xattr -x "$dir/lib/$libpython" 2>/dev/null | grep -q com.apple.quarantine; then
+        echo "Error: The pwndbg is marked as quarantined by macOS."
+        echo "To fix this, run the following command:"
+        echo ""
+        echo "  xattr -rd com.apple.quarantine \"$dir\""
+        echo ""
+        exit 1
+      fi
+    fi
+  '';
+
   wrapperBinPy =
     file:
     pkgs.writeScript "pwndbg-wrapper-bin-py" ''
       #!/bin/sh
       dir="$(cd -- "$(dirname "$(dirname "$(realpath "$0")")")" >/dev/null 2>&1 ; pwd -P)"
       ${commonEnvs}
-      exec -a "$0" ${ldLoader} "$dir/exe/python3" "$dir/${file}" "$@"
+      ${macosQuarantine}
+      exec ${ldLoader} "$dir/exe/python3" "$dir/${file}" "$@"
     '';
   wrapperBin =
     file:
@@ -69,7 +85,8 @@ let
       #!/bin/sh
       dir="$(cd -- "$(dirname "$(dirname "$(realpath "$0")")")" >/dev/null 2>&1 ; pwd -P)"
       ${commonEnvs}
-      exec -a "$0" ${ldLoader} "$dir/${file}" "$@"
+      ${macosQuarantine}
+      exec ${ldLoader} "$dir/${file}" "$@"
     '';
 
   pwndbgGdbBundled = bundler (
