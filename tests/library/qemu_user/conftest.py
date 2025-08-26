@@ -13,13 +13,13 @@ from typing import Tuple
 
 import gdb
 import pytest
+import ziglang
 
 from pwndbg.lib import tempfile
 
 _start_binary_called = False
 
 QEMU_PORT: str | None = None
-ZIGPATH = os.environ.get("ZIGPATH")
 
 COMPILATION_TARGETS_TYPE = Literal[
     "aarch64",
@@ -43,8 +43,7 @@ COMPILATION_TARGETS: list[COMPILATION_TARGETS_TYPE] = list(
 # Tuple contains (Zig target,extra_cli_args,qemu_suffix),
 COMPILE_AND_RUN_INFO: Dict[COMPILATION_TARGETS_TYPE, Tuple[str, Tuple[str, ...], str]] = {
     "aarch64": ("aarch64-freestanding", (), "aarch64"),
-    # TODO: when updating to newer version of Zig, this -mcpu option can be removed
-    "arm": ("arm-freestanding", ("-mcpu=cortex_a7",), "arm"),
+    "arm": ("arm-freestanding", (), "arm"),
     "riscv32": ("riscv32-freestanding", (), "riscv32"),
     "riscv64": ("riscv64-freestanding", (), "riscv64"),
     "mips32": ("mips-freestanding", (), "mips"),
@@ -125,10 +124,6 @@ def qemu_assembly_run():
     The `path` is returned from `make_elf_from_assembly` (provided by pwntools)
     """
 
-    if ZIGPATH is None:
-        raise Exception("ZIGPATH not defined")
-
-    PATH_TO_ZIG = os.path.join(ZIGPATH, "zig")
     ensure_qemu_port()
 
     qemu: subprocess.Popen = None
@@ -155,7 +150,7 @@ def qemu_assembly_run():
         # Build the binary with Zig
         compile_process = subprocess.run(
             [
-                PATH_TO_ZIG,
+                os.path.join(os.path.dirname(ziglang.__file__), "zig"),
                 "cc",
                 *extra_cli_args,
                 f"--target={zig_target}",

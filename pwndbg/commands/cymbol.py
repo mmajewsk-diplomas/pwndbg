@@ -31,8 +31,8 @@ import pwndbg
 import pwndbg.aglib.arch
 import pwndbg.commands
 import pwndbg.lib.config
-import pwndbg.lib.gcc
 import pwndbg.lib.tempfile
+import pwndbg.lib.zig
 from pwndbg.color import message
 from pwndbg.commands import CommandCategory
 
@@ -58,6 +58,13 @@ loaded_symbols: Dict[str, str] = {}
 
 # Where generated symbol source files are saved.
 pwndbg_cachedir = pwndbg.lib.tempfile.cachedir("custom-symbols")
+
+
+def create_temp_header_file(content: str) -> str:
+    """Create a temporary header file with the given content."""
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".h") as tmp_file:
+        tmp_file.write(content.encode())
+        return tmp_file.name
 
 
 def unload_loaded_symbol(custom_structure_name: str) -> None:
@@ -101,15 +108,19 @@ def generate_debug_symbols(
         pwndbg_debug_symbols_output_file,
     ]
 
-    # TODO: implement remote debugging support.
-    gcc_flags = pwndbg.lib.gcc.which(pwndbg.aglib.arch)
     if gcc_compiler_path != "":
-        gcc_flags[0] = gcc_compiler_path  # type: ignore[call-overload]
+        compiler_flags = [gcc_compiler_path]
+    else:
+        try:
+            compiler_flags = pwndbg.lib.zig.flags(pwndbg.aglib.arch)
+        except ValueError as exception:
+            print(message.error(exception))
+            return None
 
-    gcc_cmd = gcc_flags + gcc_extra_flags
+    gcc_cmd = compiler_flags + gcc_extra_flags
 
     try:
-        subprocess.run(gcc_cmd, capture_output=True, check=True)
+        subprocess.run(gcc_cmd, check=True, text=True)
     except subprocess.CalledProcessError as exception:
         print(message.error(exception))
         print(
@@ -132,7 +143,7 @@ def add_custom_structure(custom_structure_name: str, force=False):
     if os.path.exists(pwndbg_custom_structure_path) and not force:
         option = input(
             message.notice(
-                "A custom structure was found with the given name, would you like to overwrite it? [y/n] "
+                "A custom structure was found with the given name, would you like to overwrite it? [y/N] "
             )
         )
         if option != "y":
@@ -173,18 +184,12 @@ def add_structure_from_header(
         if not force:
             option = input(
                 message.notice(
-                    f"Structure '{custom_structure_name}' already exists. Overwrite? [y/n] "
+                    f"Structure '{custom_structure_name}' already exists. Overwrite? [y/N] "
                 )
             )
             if option.lower() != "y":
                 print(message.notice("Aborted by user."))
                 return
-        else:
-            print(
-                message.warn(
-                    f"Overwriting existing structure '{custom_structure_name}' due to --force flag."
-                )
-            )
 
     try:
         with open(header_file, "r") as src, open(pwndbg_custom_structure_path, "w") as f:
