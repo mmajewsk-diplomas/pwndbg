@@ -1,7 +1,6 @@
 .PHONY: all
 
-ZIGPATH ?= ../../../.zig
-ZIGCC =	$(ZIGPATH)/zig cc
+ZIGCC = uv run python3 -m ziglang cc
 
 ARCHS = aarch64 arm riscv64 mips32 mipsel32 mips64 loongarch64 s390x powerpc32 powerpc64
 
@@ -24,9 +23,9 @@ CFLAGS.aarch64 = $(ALL_FLAGS) --target=aarch64-linux-musl
 CFLAGS.arm = $(ALL_FLAGS) --target=arm-linux-musleabihf
 # CFLAGS.riscv32 = $(ALL_FLAGS) --target=riscv32-linux-musl
 CFLAGS.riscv64 = $(ALL_FLAGS) --target=riscv64-linux-musl
-CFLAGS.mips32 = $(ALL_FLAGS) --target=mips-linux-musl # Big-endian MIPS
-CFLAGS.mipsel32 = $(ALL_FLAGS) --target=mipsel-linux-musl # Little-endian MIPS
-CFLAGS.mips64 = $(ALL_FLAGS) --target=mips64-linux-musl
+CFLAGS.mips32 = $(ALL_FLAGS) --target=mips-linux-musleabi # Big-endian MIPS
+CFLAGS.mipsel32 = $(ALL_FLAGS) --target=mipsel-linux-musleabi # Little-endian MIPS
+CFLAGS.mips64 = $(ALL_FLAGS) --target=mips64-linux-muslabi64
 # CFLAGS.loongarch64 = $(ALL_FLAGS) --target=loongarch64-linux-musl
 # CFLAGS.s390x = $(ALL_FLAGS) --target=s390x-linux-musl -mcpu=z13
 CFLAGS.powerpc32 = $(ALL_FLAGS) --target=powerpc-linux-musl

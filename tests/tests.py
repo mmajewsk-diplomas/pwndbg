@@ -14,6 +14,8 @@ import time
 from enum import Enum
 from pathlib import Path
 
+import ziglang
+
 from .host import TestHost
 from .host import TestResult
 from .host import TestStatus
@@ -38,7 +40,6 @@ def main():
     # building tests, even if the user has requested a nix-compatible test.
     #
     # Ideally, however, we would build the test targets as part of `nix verify`.
-    ensure_zig_path(local_pwndbg_root)
     make_all(local_pwndbg_root / args.group.binary_dir())
 
     if not args.driver.can_run(args.group):
@@ -47,11 +48,19 @@ def main():
         )
         sys.exit(1)
 
+    force_serial = False
     match args.driver:
         case Driver.GDB:
             host = get_gdb_host(args, local_pwndbg_root)
         case Driver.LLDB:
             host = get_lldb_host(args, local_pwndbg_root)
+
+            # LLDB does not properly support having its tests run in parallel,
+            # so we forcibly disable it, for now.
+            print(
+                "WARNING: LLDB tests always run in series, even when parallel execution is requested."
+            )
+            force_serial = True
 
     # Handle the case in which the user only wants the collection to run.
     if args.collect_only:
@@ -61,7 +70,12 @@ def main():
 
     # Actually run the tests.
     run_tests_and_print_stats(
-        host, args.test_name_filter, args.pdb, args.serial, args.verbose, coverage_out
+        host,
+        args.test_name_filter,
+        args.pdb,
+        force_serial or args.serial,
+        args.verbose,
+        coverage_out,
     )
 
 
@@ -314,14 +328,6 @@ def parse_args():
     return parser.parse_args()
 
 
-def ensure_zig_path(local_pwndbg_root: Path):
-    if "ZIGPATH" not in os.environ:
-        # If ZIGPATH is not set, set it to $pwd/.zig
-        # In Docker environment this should by default be set to /opt/zig
-        os.environ["ZIGPATH"] = str(local_pwndbg_root / ".zig")
-    print(f'[+] ZIGPATH set to {os.environ["ZIGPATH"]}')
-
-
 def make_all(path: Path, jobs: int = multiprocessing.cpu_count()):
     """
     Build the binaries for a given test group.
@@ -331,7 +337,15 @@ def make_all(path: Path, jobs: int = multiprocessing.cpu_count()):
 
     print(f"[+] make -C {path} -j{jobs} all")
     try:
-        subprocess.check_call(["make", f"-j{jobs}", "all"], cwd=str(path))
+        subprocess.check_call(
+            [
+                "make",
+                f"-j{jobs}",
+                "ZIGCC=" + os.path.join(os.path.dirname(ziglang.__file__), "zig") + " cc",
+                "all",
+            ],
+            cwd=str(path),
+        )
     except subprocess.CalledProcessError:
         sys.exit(1)
 
