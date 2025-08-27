@@ -53,6 +53,23 @@ def address_or_module_name(s) -> int:
         raise argparse.ArgumentTypeError("Unknown hexdump argument type.")
 
 
+def format_c(data: bytes) -> str:
+    toks = [f"0x{b:02x}" for b in data]
+    lines = []
+    for i in range(0, len(toks), 16):
+        lines.append("    " + ", ".join(toks[i : i + 16]) + ",")
+    body = "\n".join(lines)
+    return "static const unsigned char data[] = {\n" + body + "\n};\n"
+
+
+def format_py(data: bytes) -> str:
+    lines = []
+    for i in range(0, len(data), 16):
+        seg = data[i : i + 16]
+        lines.append('    b"' + "".join(f"\\x{b:02x}" for b in seg) + '"')
+    return "data = (\n" + "\n".join(lines) + "\n)\n"
+
+
 parser = argparse.ArgumentParser(
     description="Hexdumps data at the specified address or module name."
 )
@@ -66,11 +83,20 @@ parser.add_argument(
 parser.add_argument(
     "count", nargs="?", default=pwndbg.config.hexdump_bytes, help="Number of bytes to dump"
 )
+parser.add_argument(
+    "-C",
+    "--code",
+    type=str,
+    nargs="?",
+    const="py",
+    choices=("py", "c"),
+    help="Output as source python or c code (default: py)",
+)
 
 
 @pwndbg.commands.Command(parser, category=CommandCategory.MEMORY)
 @pwndbg.commands.OnlyWhenRunning
-def hexdump(address, count=pwndbg.config.hexdump_bytes) -> None:
+def hexdump(address, count=pwndbg.config.hexdump_bytes, code: str | None = None) -> None:
     if hexdump.repeat:
         address = hexdump.last_address
     else:
@@ -127,6 +153,14 @@ def hexdump(address, count=pwndbg.config.hexdump_bytes) -> None:
         hexdump.last_address = address + count
     except pwndbg.dbg_mod.Error as e:
         print(e)
+        return
+
+    if code:
+        if code == "c":
+            print(format_c(data))
+        else:
+            print(format_py(data))
+        hexdump.offset += len(data)
         return
 
     result = pwndbg.hexdump.hexdump(
