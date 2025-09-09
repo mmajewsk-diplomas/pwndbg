@@ -85,6 +85,9 @@ def prompt_hook():
     # Clear the prompt cache manually.
     pwndbg.lib.cache.clear_cache("prompt")
 
+    if not pwndbg.config.auto_context:
+        return
+
     global should_show_context
     if should_show_context:
         pwndbg.commands.context.context()

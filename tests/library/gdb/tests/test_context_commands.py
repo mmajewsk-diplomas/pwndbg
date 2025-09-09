@@ -91,13 +91,26 @@ def test_empty_context_sections(start_binary, sections):
 
     # Actual test check
     gdb.execute(f"set context-sections {sections}", to_string=True)
-    assert pwndbg.config.context_sections.value == ""
-    assert gdb.execute("context", to_string=True) == ""
+    assert pwndbg.config.context_sections.value != ""
+    assert gdb.execute("context", to_string=True) != ""
 
     # Bring back old values && sanity check
     gdb.execute(f"set context-sections {default_ctx_sects}")
     assert pwndbg.config.context_sections.value == default_ctx_sects
     assert gdb.execute("context", to_string=True) != ""
+
+
+def test_auto_context_toggle(start_binary):
+    start_binary(USE_FDS_BINARY)
+
+    assert bool(pwndbg.config.auto_context.value) is True
+
+    gdb.execute("set auto-context off", to_string=True)
+    assert bool(pwndbg.config.auto_context.value) is False
+    assert gdb.execute("context", to_string=True) != ""
+
+    gdb.execute("set auto-context on", to_string=True)
+    assert bool(pwndbg.config.auto_context.value) is True
 
 
 def test_source_code_tabstop(start_binary):
