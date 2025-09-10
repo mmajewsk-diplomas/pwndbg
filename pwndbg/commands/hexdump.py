@@ -57,7 +57,8 @@ def format_c(data: bytes) -> str:
     toks = [f"0x{b:02x}" for b in data]
     lines = []
     for i in range(0, len(toks), 16):
-        lines.append("    " + ", ".join(toks[i : i + 16]) + ",")
+        elem = ", ".join(toks[i : i + 16])
+        lines.append(f"    {elem},")
     body = "\n".join(lines)
     return "static const unsigned char data[] = {\n" + body + "\n};\n"
 
@@ -65,8 +66,8 @@ def format_c(data: bytes) -> str:
 def format_py(data: bytes) -> str:
     lines = []
     for i in range(0, len(data), 16):
-        seg = data[i : i + 16]
-        lines.append('    b"' + "".join(f"\\x{b:02x}" for b in seg) + '"')
+        seg = "".join(f"\\x{b:02x}" for b in data[i : i + 16])
+        lines.append(f'    b"{seg}"')
     return "data = (\n" + "\n".join(lines) + "\n)\n"
 
 
