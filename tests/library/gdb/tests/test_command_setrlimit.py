@@ -1,14 +1,8 @@
 from __future__ import annotations
 
-import pytest
 from unittest.mock import patch
-from . import get_binary
+
 import pwndbg.commands.setrlimit as sr
-
-if sr.dbg.is_gdblib_available():
-    import gdb
-
-REFERENCE_BINARY = get_binary("reference-binary.out")
 
 
 def test_setrlimit_unknown_resource(capfd):

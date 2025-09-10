@@ -735,11 +735,6 @@ def context(subcontext=None, enabled=None) -> None:
         subcontext = []
     args = subcontext
 
-    # Inform when sections set to be empty
-    sections = pwndbg.config.context_sections
-    if not sections:
-        print(message.warn("Context sections are empty. You can set context-sections to the following values: args, regs, disasm, stack, backtrace, code, expressions, ghidra, heap_tracker, threads, last_signal"))
-
     if len(args) == 0:
         args = config_context_sections.split()
 
@@ -753,7 +748,7 @@ def context(subcontext=None, enabled=None) -> None:
             sections.append(("legend", lambda *args, **kwargs: [M.legend() + history_status]))
 
     sections += [(arg, context_sections.get(arg[0], None)) for arg in args]
-        
+
     result = defaultdict(list)
     result_settings: DefaultDict[str, Dict[Any, Any]] = defaultdict(dict)
     for section, func in sections:
