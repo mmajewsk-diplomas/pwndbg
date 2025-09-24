@@ -60,7 +60,7 @@ def format_c(data: bytes) -> str:
         elem = ", ".join(toks[i : i + 16])
         lines.append(f"    {elem},")
     body = "\n".join(lines)
-    return "static const unsigned char data[] = {\n" + body + "\n};\n"
+    return f"static const unsigned char data[] = {{\n{body}\n}};\n"
 
 
 def format_py(data: bytes) -> str:
@@ -68,7 +68,7 @@ def format_py(data: bytes) -> str:
     for i in range(0, len(data), 16):
         seg = "".join(f"\\x{b:02x}" for b in data[i : i + 16])
         lines.append(f'    b"{seg}"')
-    return "data = (\n" + "\n".join(lines) + "\n)\n"
+    return f"data = (\n{'\n'.join(lines)}\n)\n"
 
 
 parser = argparse.ArgumentParser(
