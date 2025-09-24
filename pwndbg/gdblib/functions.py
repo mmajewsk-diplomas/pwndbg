@@ -135,6 +135,28 @@ def base(name_pattern: gdb.Value | str):
 
     raise gdb.GdbError(f"$base error: No mapping named '{name}'")
 
+@GdbFunction(only_when_running=True)
+def heap() -> gdb.Value:
+    """
+    Return the base address of the heap mapping.
+
+    Example:
+    ```
+    ```
+    """
+    return gdb.parse_and_eval('$base("heap")')
+
+@GdbFunction(only_when_running=True)
+def stack() -> gdb.Value:
+    """
+    Return the base address of the stack mapping.
+
+    Example:
+    ```
+    ```
+    """
+    return gdb.parse_and_eval('$base("stack")')
+
 
 @GdbFunction()
 def hex2ptr(hex_string: gdb.Value | str) -> int:
