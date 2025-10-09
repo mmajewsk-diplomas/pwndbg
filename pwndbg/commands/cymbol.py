@@ -24,7 +24,6 @@ from typing import Dict
 from typing import TypeVar
 
 import gdb
-import lief
 from typing_extensions import ParamSpec
 from typing_extensions import Protocol
 
@@ -143,6 +142,15 @@ def generate_debug_symbols(
 
 
 def create_blank_elf():
+    try:
+        import lief
+    except ImportError:
+        print(
+            message.error(
+                "lief python package is not installed (this will be auto-installed with next version of Pwndbg; for now, you can install it manually in the Pwndbg venv)."
+            )
+        )
+        return None
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".S")
     tmp.write(b".global _start\n_start:\nnop")
     tmp.flush()
