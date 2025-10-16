@@ -135,27 +135,203 @@ def base(name_pattern: gdb.Value | str):
 
     raise gdb.GdbError(f"$base error: No mapping named '{name}'")
 
+
 @GdbFunction(only_when_running=True)
-def heap() -> gdb.Value:
+def heap(offset: gdb.Value = gdb.Value(0)) -> int:
     """
-    Return the base address of the heap mapping.
+    Return the base address of the heap mapping, optional offset allowed.
 
     Example:
     ```
+    pwndbg> vmmap
+    0x555555554000     0x555555555000 r--p     1000       0 p1
+    0x555555555000     0x555555556000 r-xp     1000    1000 p1
+    0x555555556000     0x555555557000 r--p     1000    2000 p1
+    0x555555557000     0x555555558000 r--p     1000    2000 p1
+    0x555555558000     0x555555559000 rw-p     1000    3000 p1
+    0x555555559000     0x55555557a000 rw-p    21000       0 [heap]
+    [...]
+    pwndbg> p/x $heap()
+    $1 = 0x555555559000
+    pwndbg> p/x $heap(0x10)
+    $2 = 0x555555559010
+    pwndbg> x/32bx $heap()
+    0x555555559000:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+    0x555555559008:	0x91	0x02	0x00	0x00	0x00	0x00	0x00	0x00
+    0x555555559010:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+    0x555555559018:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
     ```
     """
-    return gdb.parse_and_eval('$base("heap")')
+    base_addr = gdb.parse_and_eval('$base("heap")')
+    return int(base_addr) + int(offset)
+
 
 @GdbFunction(only_when_running=True)
-def stack() -> gdb.Value:
+def _heap(offset: gdb.Value = gdb.Value(0)) -> int:
     """
-    Return the base address of the stack mapping.
+    Alias for $heap to be compatible with GEF's $_heap.
 
     Example:
     ```
+        pwndbg> vmmap
+    0x555555554000     0x555555555000 r--p     1000       0 p1
+    0x555555555000     0x555555556000 r-xp     1000    1000 p1
+    0x555555556000     0x555555557000 r--p     1000    2000 p1
+    0x555555557000     0x555555558000 r--p     1000    2000 p1
+    0x555555558000     0x555555559000 rw-p     1000    3000 p1
+    0x555555559000     0x55555557a000 rw-p    21000       0 [heap]
+    [...]
+    pwndbg> p/x $_heap(0x10)
+    $1 = 0x555555559010
     ```
     """
-    return gdb.parse_and_eval('$base("stack")')
+    return heap(offset)
+
+
+@GdbFunction(only_when_running=True)
+def stack(offset: gdb.Value = gdb.Value(0)) -> int:
+    """
+    Return the base address of the stack mapping, optional offset allowed.
+
+    Example:
+    ```
+    pwndbg> vmmap
+    [...]
+    0x7ffff7fc5000     0x7ffff7fc6000 r--p     1000       0 /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+    0x7ffff7fc6000     0x7ffff7ff1000 r-xp    2b000    1000 /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+    0x7ffff7ff1000     0x7ffff7ffb000 r--p     a000   2c000 /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+    0x7ffff7ffb000     0x7ffff7ffd000 r--p     2000   36000 /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+    0x7ffff7ffd000     0x7ffff7fff000 rw-p     2000   38000 /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+    0x7ffffffde000     0x7ffffffff000 rw-p    21000       0 [stack]
+    [...]
+    pwndbg> p/x $stack()
+    $1 = 0x7ffffffde000
+    pwndbg> x/gx $stack()
+    0x7ffffffde000:	0x0000000000000000
+    ```
+    """
+    base_addr = gdb.parse_and_eval('$base("stack")')
+    return int(base_addr) + int(offset)
+
+
+@GdbFunction(only_when_running=True)
+def _stack(offset: gdb.Value = gdb.Value(0)) -> int:
+    """
+    Alias for $stack to be compatible with GEF's $_stack.
+
+    Example:
+    ```
+    pwndbg> vmmap
+    [...]
+    0x7ffff7fc5000     0x7ffff7fc6000 r--p     1000       0 /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+    0x7ffff7fc6000     0x7ffff7ff1000 r-xp    2b000    1000 /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+    0x7ffff7ff1000     0x7ffff7ffb000 r--p     a000   2c000 /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+    0x7ffff7ffb000     0x7ffff7ffd000 r--p     2000   36000 /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+    0x7ffff7ffd000     0x7ffff7fff000 rw-p     2000   38000 /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+    0x7ffffffde000     0x7ffffffff000 rw-p    21000       0 [stack]
+    [...]
+    pwndbg> p/x $_stack(0x8)
+    $1 = 0x7ffffffde008
+    ```
+    """
+    return stack(offset)
+
+
+@GdbFunction(only_when_running=True)
+def bss(offset: gdb.Value = gdb.Value(0)) -> int:
+    """
+    Return the address of the program's BSS start. Optional offset allowed.
+
+    Example:
+    ```
+    pwndbg> p/x $bss()
+    $1 = 0x555555558010
+    pwndbg> p/x $bss(0x10)
+    $2 = 0x555555558020
+    ```
+    """
+    bss_symbols = [
+        "__bss_start",
+        "_bss_start",
+        "__bss_start__",
+        "_edata",
+        "bss_start",
+    ]
+
+    for name in bss_symbols:
+        try:
+            val = gdb.parse_and_eval(name)
+            return int(val) + int(offset)
+        except Exception:
+            try:
+                val = gdb.parse_and_eval(f"&{name}")
+                return int(val) + int(offset)
+            except Exception:
+                continue
+
+    raise gdb.GdbError("$bss error: could not find a known bss symbol. ")
+
+
+@GdbFunction(only_when_running=True)
+def _bss(offset: gdb.Value = gdb.Value(0)) -> int:
+    """
+    Alias for $bss.
+
+    Example:
+    ```
+    pwndbg> p/x $_bss(0x10)
+    $1 = 0x555555558020
+    ```
+    """
+    return bss(offset)
+
+
+@GdbFunction(only_when_running=True)
+def got(offset: gdb.Value = gdb.Value(0)) -> int:
+    """
+    Return the address of the Global Offset Table (GOT), optional offset allowed.
+
+    Example:
+    ```
+    pwndbg> p/x $got()
+    $1 = 0x7ffff7e02b80
+    pwndbg> p/x $got(0x8)
+    $2 = 0x7ffff7e02b88
+    ```
+    """
+    got_symbols = [
+        "_GLOBAL_OFFSET_TABLE_",
+        "__global_offset_table",
+        "__global_offset_table__",
+        "GOT",
+        "__got_start",
+    ]
+
+    for name in got_symbols:
+        try:
+            val = gdb.parse_and_eval(name)
+            return int(val) + int(offset)
+        except Exception:
+            try:
+                val = gdb.parse_and_eval(f"&{name}")
+                return int(val) + int(offset)
+            except Exception:
+                continue
+    raise gdb.GdbError("$got error: could not find a known GOT symbol. ")
+
+
+@GdbFunction(only_when_running=True)
+def _got(offset: gdb.Value = gdb.Value(0)) -> int:
+    """
+    Alias for $got.
+
+    Example:
+    ```
+    pwndbg> p/x $_got(0x8)
+    $1 = 0x7ffff7e02b88
+    ```
+    """
+    return got(offset)
 
 
 @GdbFunction()
