@@ -9,6 +9,7 @@
 }:
 let
   lib = pkgs.lib;
+
   hacks = pkgs.callPackage inputs.pyproject-nix.build.hacks { };
   workspace = inputs.uv2nix.lib.workspace.loadWorkspace { workspaceRoot = ./..; };
 
