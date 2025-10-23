@@ -54,7 +54,7 @@ def address_or_module_name(s) -> int:
 
 
 def format_c(data: bytes) -> str:
-    toks = [f"0x{b:02x}" for b in data]
+    toks = [f"{b:#02x}" for b in data]
     lines = []
     for i in range(0, len(toks), 16):
         elem = ", ".join(toks[i : i + 16])
@@ -91,7 +91,7 @@ parser.add_argument(
     nargs="?",
     const="py",
     choices=("py", "c"),
-    help="Output as source python or c code (default: py)",
+    help="Output as Python or C code data definition (default: py)",
 )
 
 
@@ -157,26 +157,22 @@ def hexdump(address, count=pwndbg.config.hexdump_bytes, code: str | None = None)
         return
 
     if code:
-        if code == "c":
-            print(format_c(data))
-        else:
-            print(format_py(data))
+        source = format_py(data) if code == "py" else format_c(data)
+        print(source)
         hexdump.offset += len(data)
-        return
+    else:
+        result = pwndbg.hexdump.hexdump(
+            data,
+            address=address,
+            width=width,
+            group_width=group_width,
+            flip_group_endianness=flip_group_endianness,
+            offset=hexdump.offset,
+        )
+        for line in result:
+            print(line)
 
-    result = pwndbg.hexdump.hexdump(
-        data,
-        address=address,
-        width=width,
-        group_width=group_width,
-        flip_group_endianness=flip_group_endianness,
-        offset=hexdump.offset,
-    )
-
-    for line in result:
-        print(line)
-
-    hexdump.offset += count
+    hexdump.offset += len(data)
 
 
 hexdump.last_address = 0
