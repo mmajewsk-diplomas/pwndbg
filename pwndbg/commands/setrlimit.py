@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import argparse
 
+import gdb
+
 import pwndbg.color.message as message
 import pwndbg.commands
-import pwndbg.dbg as dbg
 from pwndbg.commands import CommandCategory
-
-if dbg.is_gdblib_available():
-    import gdb
 
 RLIM_INFINITY = -1
 LIMITS: dict[str, int] = {
@@ -44,11 +42,10 @@ parser.add_argument(
 
 
 def _invoke_setrlimit(num: int, soft_val: int, hard_val: int) -> str:
-    if dbg.is_gdblib_available():
-        return gdb.execute(
-            f"call (int) setrlimit({num}, (struct rlimit[]){{ {{ {soft_val}, {hard_val} }} }})",
-            to_string=True,
-        )
+    return gdb.execute(
+        f"call (int) setrlimit({num}, (struct rlimit[]){{ {{ {soft_val}, {hard_val} }} }})",
+        to_string=True,
+    )
 
 
 @pwndbg.commands.Command(parser, category=CommandCategory.MISC)
