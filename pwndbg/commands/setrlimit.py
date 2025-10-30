@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import argparse
 
-if pwndbg.dbg.is_gdblib_available():
-    import gdb
-
 import pwndbg.color.message as message
 import pwndbg.commands
 from pwndbg.commands import CommandCategory
+
+if pwndbg.dbg.is_gdblib_available():
+    import gdb
 
 RLIM_INFINITY = -1
 LIMITS: dict[str, int] = {
