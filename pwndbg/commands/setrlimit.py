@@ -88,5 +88,5 @@ def setrlimit(resource: str, soft: str, hard: str | None = None) -> None:
                 f"hard={'∞' if hard_val==RLIM_INFINITY else hard_val}"
             )
         )
-    except Exception as e:
-        print(message.error(f"setrlimit failed: {e}"))
+    except pwndbg.dbg_mod.Error as e:
+        print(message.error(str(e)))
