@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import argparse
 
-import gdb
+if pwndbg.dbg.is_gdblib_available():
+    import gdb
 
 import pwndbg.color.message as message
 import pwndbg.commands
