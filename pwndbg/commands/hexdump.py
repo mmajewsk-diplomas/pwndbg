@@ -68,7 +68,7 @@ def format_py(data: bytes) -> str:
     for i in range(0, len(data), 16):
         seg = "".join(f"\\x{b:02x}" for b in data[i : i + 16])
         lines.append(f'    b"{seg}"')
-    return f"data = (\n{'\n'.join(lines)}\n)\n"
+    return "data = (\n{}\n)\n".format("\n".join(lines))
 
 
 parser = argparse.ArgumentParser(
