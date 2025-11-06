@@ -288,7 +288,7 @@ class RegisterSet:
         yield from self.all
 
 
-class PsuedoEmulatedRegisterFile:
+class PseudoEmulatedRegisterFile:
     """
     This class represents a set of registers that can be written, read, and invalidated.
 
@@ -551,6 +551,8 @@ aarch64_scr_flags = BitFlags(
     ]
 )
 
+aarch64_mmfr_flags = BitFlags([("VARange", (16, 19))])
+
 arm = RegisterSet(
     retaddr=(Reg("lr", 4),),
     flags={"cpsr": arm_cpsr_flags},
@@ -598,7 +600,7 @@ armcm = RegisterSet(
 
 # AArch64 has a PSTATE register, but GDB represents it as the CPSR register
 aarch64 = RegisterSet(
-    retaddr=(Reg("lr", 8),), # x30
+    retaddr=(Reg("lr", 8),),  # x30
     flags={"cpsr": aarch64_cpsr_flags},
     extra_flags={
         "scr_el3": aarch64_scr_flags,
@@ -609,10 +611,11 @@ aarch64 = RegisterSet(
         "spsr_el2": aarch64_cpsr_flags,
         "spsr_el3": aarch64_cpsr_flags,
         "tcr_el1": aarch64_tcr_flags,
+        "id_aa64mmfr2_el1": aarch64_mmfr_flags,
         "ttbr0_el1": BitFlags(),
         "ttbr1_el1": BitFlags(),
     },
-    frame=Reg("fp", 8, subregisters=(Reg("w29", 4, zero_extend_writes=True),)), # x29
+    frame=Reg("fp", 8, subregisters=(Reg("w29", 4, zero_extend_writes=True),)),  # x29
     gpr=(
         Reg("x0", 8, subregisters=(Reg("w0", 4, zero_extend_writes=True),)),
         Reg("x1", 8, subregisters=(Reg("w1", 4, zero_extend_writes=True),)),
