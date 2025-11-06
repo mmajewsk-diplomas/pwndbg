@@ -32,7 +32,7 @@ class KernelVmmap:
         self.pages = pages
         self.sections = None
         self.pi = pwndbg.aglib.kernel.arch_paginginfo()
-        if self.pi and pwndbg.aglib.kernel.has_debug_symbols():
+        if self.pi:
             self.sections = self.pi.markers()
 
     def get_name(self, addr: int) -> str:
@@ -41,7 +41,7 @@ class KernelVmmap:
         for i in range(len(self.sections) - 1):
             name, cur = self.sections[i]
             _, next = self.sections[i + 1]
-            if cur is None or next is None:
+            if cur is None or next is None or name is None:
                 continue
             if cur <= addr < next:
                 return name
@@ -424,8 +424,7 @@ def kernel_vmmap(process_pages=True) -> Tuple[pwndbg.lib.memory.Page, ...]:
             for page in pages:
                 if page.objfile == kv.pi.ESPSTACK:
                     continue
-                _, pgwalk_res = pwndbg.aglib.kernel.pagewalk(page.start)
-                entry, _ = pgwalk_res[0]
+                entry = pwndbg.aglib.kernel.pagewalk(page.start)[0].entry
                 if entry and entry >> 63 == 0:
                     page.flags |= 1
 

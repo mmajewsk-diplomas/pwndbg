@@ -214,7 +214,7 @@ Binary Ninja XML-RPC server port.
 
 
 
-**Default:** 31337  
+**Default:** 43717  
 
 ----------
 
@@ -684,7 +684,7 @@ Ida xmlrpc server port.
 
 
 
-**Default:** 31337  
+**Default:** 43718  
 
 ----------
 
@@ -855,6 +855,28 @@ Whether to show call arguments below instruction.
 
 
 **Default:** on  
+
+----------
+
+## **objc-max-function-arguments**
+
+
+Maximum number of arguments to resolve for an Objective-C method call.
+
+
+
+**Default:** 32  
+
+----------
+
+## **objc-max-function-types-depth**
+
+
+Maximum allowed depth for a type in an Objective-C method call.
+
+
+
+**Default:** 32  
 
 ----------
 
