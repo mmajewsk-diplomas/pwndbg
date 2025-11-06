@@ -23,6 +23,7 @@ from capstone.arm import ARM_INS_TBH
 from capstone.loongarch import LOONGARCH_INS_ALIAS_JR
 from capstone.loongarch import LOONGARCH_INS_B
 from capstone.loongarch import LOONGARCH_INS_BL
+from capstone.loongarch import LOONGARCH_INS_CALL36
 from capstone.loongarch import LOONGARCH_INS_JIRL
 from capstone.mips import MIPS_INS_ALIAS_B
 from capstone.mips import MIPS_INS_ALIAS_BAL
@@ -44,12 +45,20 @@ from capstone.riscv import RISCV_INS_C_JALR
 from capstone.riscv import RISCV_INS_C_JR
 from capstone.riscv import RISCV_INS_JAL
 from capstone.riscv import RISCV_INS_JALR
+from capstone.sparc import SPARC_INS_ALIAS_CALL
+from capstone.sparc import SPARC_INS_CALL
 from capstone.sparc import SPARC_INS_JMPL
 from capstone.systemz import SYSTEMZ_INS_B
 from capstone.systemz import SYSTEMZ_INS_BAL
 from capstone.systemz import SYSTEMZ_INS_BALR
+from capstone.systemz import SYSTEMZ_INS_BR
+from capstone.systemz import SYSTEMZ_INS_BRAS
+from capstone.systemz import SYSTEMZ_INS_BRASL
+from capstone.systemz import SYSTEMZ_INS_J
+from capstone.systemz import SYSTEMZ_INS_JL
 from capstone.x86 import X86_INS_CALL
 from capstone.x86 import X86_INS_JMP
+from capstone.x86 import X86_INS_RET
 from capstone.x86 import X86Op
 from typing_extensions import override
 
@@ -57,10 +66,8 @@ import pwndbg.dbg
 from pwndbg.dbg import DisassembledInstruction
 
 # Architecture specific instructions that mutate the instruction pointer unconditionally
-# The Capstone RET and CALL groups are also used to filter CALL and RET types when we check for unconditional jumps,
-# so we don't need to manually specify those for each architecture
 UNCONDITIONAL_JUMP_INSTRUCTIONS: Dict[int, Set[int]] = {
-    CS_ARCH_X86: {X86_INS_CALL, X86_INS_JMP},
+    CS_ARCH_X86: {X86_INS_CALL, X86_INS_RET, X86_INS_JMP},
     CS_ARCH_MIPS: {
         MIPS_INS_J,
         MIPS_INS_JR,
@@ -72,7 +79,7 @@ UNCONDITIONAL_JUMP_INSTRUCTIONS: Dict[int, Set[int]] = {
         MIPS_INS_B,
         MIPS_INS_ALIAS_B,
     },
-    CS_ARCH_SPARC: {SPARC_INS_JMPL},
+    CS_ARCH_SPARC: {SPARC_INS_CALL, SPARC_INS_ALIAS_CALL, SPARC_INS_JMPL},
     CS_ARCH_ARM: {
         ARM_INS_TBB,
         ARM_INS_TBH,
@@ -87,12 +94,22 @@ UNCONDITIONAL_JUMP_INSTRUCTIONS: Dict[int, Set[int]] = {
         RISCV_INS_C_JR,
     },
     CS_ARCH_PPC: {PPC_INS_B, PPC_INS_BA, PPC_INS_BL, PPC_INS_BLA},
-    CS_ARCH_SYSTEMZ: {SYSTEMZ_INS_B, SYSTEMZ_INS_BAL, SYSTEMZ_INS_BALR},
+    CS_ARCH_SYSTEMZ: {
+        SYSTEMZ_INS_J,
+        SYSTEMZ_INS_JL,
+        SYSTEMZ_INS_B,
+        SYSTEMZ_INS_BR,
+        SYSTEMZ_INS_BAL,
+        SYSTEMZ_INS_BALR,
+        SYSTEMZ_INS_BRAS,
+        SYSTEMZ_INS_BRASL,
+    },
     CS_ARCH_LOONGARCH: {
         LOONGARCH_INS_B,
         LOONGARCH_INS_BL,
         LOONGARCH_INS_JIRL,
         LOONGARCH_INS_ALIAS_JR,
+        LOONGARCH_INS_CALL36,
     },
 }
 
@@ -105,12 +122,11 @@ BRANCH_AND_LINK_INSTRUCTIONS[CS_ARCH_MIPS] = {
     MIPS_INS_JALR,
 }
 
-# Everything that is a CALL or a RET is a unconditional jump
-GENERIC_UNCONDITIONAL_JUMP_GROUPS = {CS_GRP_CALL, CS_GRP_RET, CS_GRP_IRET}
 # All branch-like instructions - jumps thats are non-call and non-ret - should have one of these two groups in Capstone
 GENERIC_JUMP_GROUPS = {CS_GRP_JUMP, CS_GRP_BRANCH_RELATIVE}
+
 # All Capstone jumps should have at least one of these groups
-ALL_JUMP_GROUPS = GENERIC_JUMP_GROUPS | GENERIC_UNCONDITIONAL_JUMP_GROUPS
+ALL_JUMP_GROUPS = GENERIC_JUMP_GROUPS | {CS_GRP_CALL, CS_GRP_RET, CS_GRP_IRET}
 
 # All non-ret jumps
 FORWARD_JUMP_GROUP = {CS_GRP_CALL} | GENERIC_JUMP_GROUPS
@@ -165,7 +181,6 @@ class PwndbgInstruction(Protocol):
     target_string: str | None
     target_const: bool | None
     condition: InstructionCondition
-    declare_conditional: bool | None
     declare_is_unconditional_jump: bool
     force_unconditional_jump_target: bool
     annotation: str | None
@@ -175,6 +190,7 @@ class PwndbgInstruction(Protocol):
     causes_branch_delay: bool
     split: SplitType
     emulated: bool
+    register_writes: Dict[int, int]
 
     @property
     def call_like(self) -> bool: ...
@@ -193,6 +209,9 @@ class PwndbgInstruction(Protocol):
 
     @property
     def is_conditional_jump_taken(self) -> bool: ...
+
+    @property
+    def jump_result_is_known(self) -> bool: ...
 
     @property
     def bytes(self) -> bytearray: ...
@@ -314,21 +333,6 @@ class PwndbgInstructionImpl(PwndbgInstruction):
         FALSE if the instruction has a conditional action, and we know it is not taken.
         """
 
-        self.declare_conditional: bool | None = None
-        """
-        This field is used to declare if the instruction is a conditional instruction.
-        In most cases, we can determine this purely based on the instruction ID, and this field is irrelevent.
-        However, in some arches, like Arm, the same instruction can be made conditional by certain instruction attributes.
-        Ex:
-            Arm, `bls` instruction. This is encoded as a `b` under the code, with an additional condition code field.
-            In this case, sometimes a `b` instruction is unconditional (always branches), in other cases it is conditional.
-            We use this field to disambiguate these cases.
-
-        True if we manually determine this instruction is a conditional instruction
-        False if it's not a conditional instruction
-        None if we don't have a determination (most cases)
-        """
-
         self.declare_is_unconditional_jump: bool = False
         """
         This field is used to declare that this instruction is an unconditional jump.
@@ -396,6 +400,12 @@ class PwndbgInstructionImpl(PwndbgInstruction):
         If the enhancement successfully used emulation for this instruction
         """
 
+        self.register_writes = {}
+        """
+        Mapping of Capstone register id to integer value. During enhancement, we might manually determine
+        that an instruction writes some value to a register, and this is stored here.
+        """
+
     @property
     def call_like(self) -> bool:
         """
@@ -443,8 +453,7 @@ class PwndbgInstructionImpl(PwndbgInstruction):
         This does not imply that we have resolved the .target
         """
         return (
-            self.declare_conditional is not False
-            and self.declare_is_unconditional_jump is False
+            self.declare_is_unconditional_jump is False
             and bool(self.groups & GENERIC_JUMP_GROUPS)
             and self.id not in UNCONDITIONAL_JUMP_INSTRUCTIONS[self.cs_insn._cs.arch]
         )
@@ -461,10 +470,8 @@ class PwndbgInstructionImpl(PwndbgInstruction):
         This does not imply that we have resolved the .target
         """
         return (
-            bool(self.groups & GENERIC_UNCONDITIONAL_JUMP_GROUPS)
+            self.declare_is_unconditional_jump
             or self.id in UNCONDITIONAL_JUMP_INSTRUCTIONS[self.cs_insn._cs.arch]
-            or self.declare_is_unconditional_jump
-            or self.declare_conditional is False
         )
 
     @property
@@ -482,6 +489,19 @@ class PwndbgInstructionImpl(PwndbgInstruction):
                 (self.next not in (None, self.address + self.size))
                 and self.condition != InstructionCondition.FALSE
             )
+        )
+
+    @property
+    def jump_result_is_known(self) -> bool:
+        """
+        True under the following conditions:
+        - If it's an unconditional jump, we know the target of the jump
+        - If it's a conditional jump, we know the target of the branch and know whether or not we take it
+        Otherwise, false
+        """
+        return self.has_jump_target and (
+            (self.is_unconditional_jump)
+            or (self.is_conditional_jump and self.condition != InstructionCondition.UNDETERMINED)
         )
 
     @property
@@ -508,6 +528,11 @@ class PwndbgInstructionImpl(PwndbgInstruction):
     def __repr__(self) -> str:
         operands_str = " ".join([repr(op) for op in self.operands])
 
+        hex_register_writes = {
+            self.cs_insn.reg_name(reg_id): hex(reg_value)
+            for reg_id, reg_value in self.register_writes.items()
+        }
+
         info = f"""{self.mnemonic} {self.op_str} at {self.address:#x} (size={self.size}) (arch: {CAPSTONE_ARCH_MAPPING_STRING.get(self.cs_insn._cs.arch,None)})
         Bytes: {pwnlib.util.fiddling.enhex(self.bytes)}
         ID: {self.id}, {self.cs_insn.insn_name()}
@@ -522,14 +547,24 @@ class PwndbgInstructionImpl(PwndbgInstruction):
         Operands: [{operands_str}]
         Conditional jump: {self.is_conditional_jump}. Taken: {self.is_conditional_jump_taken}
         Unconditional jump: {self.is_unconditional_jump}
-        Declare conditional: {self.declare_conditional}
         Declare unconditional jump: {self.declare_is_unconditional_jump}
         Force jump target: {self.force_unconditional_jump_target}
         Can change PC: {self.has_jump_target}
         Syscall: {self.syscall if self.syscall is not None else ""} {self.syscall_name if self.syscall_name is not None else "N/A"}
         Causes Delay slot: {self.causes_branch_delay}
         Split: {SplitType(self.split).name}
-        Call-like: {self.call_like}"""
+        Call-like: {self.call_like}
+        Register writes: {hex_register_writes}"""
+
+        try:
+            regs_read, regs_written = self.cs_insn.regs_access()
+            info += f"\n\tCapstone regs read: {[self.cs_insn.reg_name(reg) for reg in regs_read]}"
+            info += (
+                f"\n\tCapstone regs written: {[self.cs_insn.reg_name(reg) for reg in regs_written]}"
+            )
+        except CsError:
+            # Not all architectures support the .reg_access() API
+            pass
 
         # Hacky, but this is just for debugging
         if hasattr(self.cs_insn, "cc"):
@@ -684,7 +719,6 @@ class ManualPwndbgInstruction(PwndbgInstruction):
 
         self.condition = InstructionCondition.UNDETERMINED
 
-        self.declare_conditional = None
         self.declare_is_unconditional_jump = False
         self.force_unconditional_jump_target = False
 
@@ -700,6 +734,8 @@ class ManualPwndbgInstruction(PwndbgInstruction):
         self.split = SplitType.NO_SPLIT
 
         self.emulated = False
+
+        self.register_writes = {}
 
     @property
     def bytes(self) -> bytearray:
@@ -730,6 +766,10 @@ class ManualPwndbgInstruction(PwndbgInstruction):
 
     @property
     def is_conditional_jump_taken(self) -> bool:
+        return False
+
+    @property
+    def jump_result_is_known(self) -> bool:
         return False
 
     @override
