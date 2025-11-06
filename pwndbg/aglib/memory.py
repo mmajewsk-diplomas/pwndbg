@@ -290,6 +290,8 @@ def get_typed_pointer(
     type: str | pwndbg.dbg_mod.Type, addr: int | pwndbg.dbg_mod.Value
 ) -> pwndbg.dbg_mod.Value:
     """Look up a type by name if necessary and return a Value of addr cast to that type"""
+    if addr is None:
+        return None
     if isinstance(type, str):
         real_type = pwndbg.aglib.typeinfo.load(type)
         if real_type is None:
@@ -444,4 +446,4 @@ def is_pagefault_supported() -> bool:
 
 
 def is_kernel(addr: int):
-    return addr >> 63 == 1
+    return (addr >> 63 == 1) and peek(addr) is not None
