@@ -228,15 +228,22 @@ class CommandObj:
         # We want to run all integer and otherwise-unspecified arguments
         # through fix() so that GDB parses it.
         # FIXME: this is weird
-        for action in self.parser._actions:
-            if isinstance(action, argparse._SubParsersAction):
-                action.type = str
-            if action.dest == "help":
-                continue
-            if action.type is int:
-                action.type = fix_int_reraise_arg
-            elif action.type is None:
-                action.type = fix_reraise_arg
+        def process_actions(actions):
+            """Recursively process actions, including subparsers"""
+            for action in actions:
+                if isinstance(action, argparse._SubParsersAction):
+                    action.type = str
+                    # Recursively process each subparser's actions
+                    for subparser in action.choices.values():
+                        process_actions(subparser._actions)
+                if action.dest == "help":
+                    continue
+                if action.type is int:
+                    action.type = fix_int_reraise_arg
+                elif action.type is None:
+                    action.type = fix_reraise_arg
+
+        process_actions(self.parser._actions)
 
         assert (
             self.parser.formatter_class is argparse.HelpFormatter
@@ -943,6 +950,7 @@ def load_commands() -> None:
     import pwndbg.commands.kdmabuf
     import pwndbg.commands.kdmesg
     import pwndbg.commands.klookup
+    import pwndbg.commands.kmem_trace
     import pwndbg.commands.kmod
     import pwndbg.commands.knft
     import pwndbg.commands.ksyscalls
