@@ -7,6 +7,7 @@ import random
 import re
 import shlex
 import sys
+from asyncio import CancelledError
 from contextlib import contextmanager
 from typing import Any
 from typing import Awaitable
@@ -1711,6 +1712,20 @@ class LLDBProcess(pwndbg.dbg_mod.Process):
         return sp
 
     @override
+    def trace_ret(self, stop_handler: Callable[[], bool] | None = None, internal: bool = False):
+        if stop_handler is None:
+
+            def stop_handler():
+                return True
+
+        def new_stop_handler(sp: pwndbg.dbg_mod.StopPoint) -> bool:
+            return stop_handler()
+
+        retaddr = pwndbg.dbg.selected_frame().parent().pc()
+        bp = pwndbg.dbg_mod.BreakpointLocation(retaddr)
+        self.break_at(bp, new_stop_handler, internal)
+
+    @override
     def disasm(self, address: int) -> pwndbg.dbg_mod.DisassembledInstruction | None:
         instructions = self.target.ReadInstructions(lldb.SBAddress(address, self.target), 1)
         if not instructions.IsValid() or instructions.GetSize() == 0:
@@ -1816,6 +1831,10 @@ class LLDBProcess(pwndbg.dbg_mod.Process):
         # Queue the coroutine up for execution by the Pwndbg CLI.
         self.dbg.controllers.append((self, procedure(EXECUTION_CONTROLLER)))
 
+    @override
+    def runcmd(self, cmd) -> str:
+        return self.dbg._execute_lldb_command(cmd)
+
 
 class LLDBCommand(pwndbg.dbg_mod.CommandHandle):
     def __init__(self, handler_name: str, command_name: str):
@@ -1848,6 +1867,12 @@ class LLDB(pwndbg.dbg_mod.Debugger):
     # Relay used for exceptions originating from commands called through LLDB.
     _exception_relay: BaseException | None
 
+    in_lldb_command_handler: bool
+    "Whether an LLDB command handler is currently running"
+
+    # temporarily suspend context output
+    should_suspend_ctx: bool
+
     @override
     def setup(self, *args, **kwargs):
         import pwnlib.update
@@ -1859,6 +1884,8 @@ class LLDB(pwndbg.dbg_mod.Debugger):
         self.controllers = []
         self._current_process_is_gdb_remote = False
         self._exception_relay = None
+        self.in_lldb_command_handler = False
+        self.should_suspend_ctx = False
 
         import pwndbg
 
@@ -1895,6 +1922,10 @@ class LLDB(pwndbg.dbg_mod.Debugger):
         e = self._exception_relay
         self._exception_relay = None
         if e is not None:
+            if isinstance(e, CancelledError):
+                # Cancellations are meaningful to the CLI, raise them unchanged.
+                raise e
+
             raise pwndbg.dbg_mod.Error(e)
 
     def _execute_lldb_command(self, command: str) -> str:
@@ -1928,13 +1959,15 @@ class LLDB(pwndbg.dbg_mod.Debugger):
             def __call__(self, _, command, exe_context, result):
                 try:
                     debugger.exec_states.append(exe_context)
+                    debugger.in_lldb_command_handler = True
                     handler(debugger, command, True)
+                except BaseException as e:
+                    debugger._exception_relay = e
+                finally:
+                    debugger.in_lldb_command_handler = False
                     assert (
                         debugger.exec_states.pop() == exe_context
                     ), "Execution state mismatch on command handler"
-                except BaseException as e:
-                    debugger._exception_relay = e
-                    raise
 
         # LLDB is very particular with the object paths it will accept. It is at
         # its happiest when its pulling objects straight off the module that was
@@ -2100,6 +2133,11 @@ class LLDB(pwndbg.dbg_mod.Debugger):
             return fn
 
         return decorator
+
+    @override
+    @contextmanager
+    def ctx_suspend_once(self):
+        self.should_suspend_ctx = True
 
     @override
     def suspend_events(self, ty: pwndbg.dbg_mod.EventType) -> None:
