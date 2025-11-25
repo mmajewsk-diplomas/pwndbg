@@ -76,11 +76,16 @@
 -  [binder](kernel/binder.md) - Show Android Binder information
 -  [buddydump](kernel/buddydump.md) - Displays metadata and freelists of the buddy allocator.
 -  [kbase](kernel/kbase.md) - Finds the kernel virtual base address.
+-  [kbpf](kernel/kbpf.md) - Prints information about the linux kernel bpf progs and maps.
 -  [kchecksec](kernel/kchecksec.md) - Checks for kernel hardening configuration options.
 -  [kcmdline](kernel/kcmdline.md) - Return the kernel commandline (/proc/cmdline).
 -  [kconfig](kernel/kconfig.md) - Outputs the kernel config.
+-  [kcurrent](kernel/kcurrent.md) - Displays the current kernel task debugged by the debugger (gdb/lldb) if pid == None
+-  [kdmabuf](kernel/kdmabuf.md) - Prints DMA buf info
 -  [kdmesg](kernel/kdmesg.md) - Displays the kernel ring buffer (dmesg) contents.
+-  [kfile](kernel/kfile.md) - Displays information about fds accessible by a kernel task.
 -  [klookup](kernel/klookup.md) - Lookup kernel symbols
+-  [kmem-trace](kernel/kmem-trace.md) - Trace kernel memory (SLUB and buddy) allocations and frees.
 -  [kmod](kernel/kmod.md) - Displays the loaded Linux kernel modules.
 -  [knft-dump](kernel/knft-dump.md) - Dump all nftables: tables, chains, rules, expressions
 -  [knft-list-chains](kernel/knft-list-chains.md) - Dump netfilter chains form a specific table
@@ -115,6 +120,7 @@
 -  [libcinfo](linux_libc_elf/libcinfo.md) - Show libc version and link to its sources
 -  [linkmap](linux_libc_elf/linkmap.md) - Show the state of the Link Map
 -  [onegadget](linux_libc_elf/onegadget.md) - Find gadgets which single-handedly give code execution.
+-  [parse-seccomp](linux_libc_elf/parse-seccomp.md) - Parse a struct sock_fprog from memory and dump its filter
 -  [piebase](linux_libc_elf/piebase.md) - Calculate VA of RVA from PIE base.
 -  [plt](linux_libc_elf/plt.md) - Prints any symbols found in Procedure Linkage Table sections if any exist.
 -  [strings](linux_libc_elf/strings.md) - Extracts and displays ASCII strings from readable memory pages of the debugged process.

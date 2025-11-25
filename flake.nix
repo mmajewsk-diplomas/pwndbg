@@ -54,7 +54,6 @@
         "arm64" = "aarch64-multiplatform";
         "riscv64" = "riscv64";
         "s390x" = "s390x";
-        "ppc64" = "ppc64"; # broken lldb compilation ;(
         "ppc64le" = "powernv";
         "loong64" = "loongarch64-linux";
       };
@@ -109,17 +108,6 @@
             (
               final: prev:
               nixpkgs.lib.optionalAttrs
-                (prev.stdenv.targetPlatform.isPower64 && prev.stdenv.targetPlatform.isBigEndian)
-                {
-                  # ncurses is broken with gcc14+
-                  ncurses = prev.ncurses.override {
-                    stdenv = prev.gcc13Stdenv;
-                  };
-                }
-            )
-            (
-              final: prev:
-              nixpkgs.lib.optionalAttrs
                 (prev.stdenv.targetPlatform.isPower64 && prev.stdenv.targetPlatform.isLittleEndian)
                 {
                   # new boost is broken: https://github.com/NixOS/nixpkgs/issues/382179
@@ -160,17 +148,17 @@
                 config = ./nix/bundle/nfpm.yaml;
               }
             )
-          ) //
-          mapKeysWithName (name: "pwndbg-lldb-portable-${name}") (
-              forPortables (
-                  packager:
-                  pkgUtil.${system}.buildPackagePFPM {
-                    inherit packager;
-                    drv = portableDrvLldb system;
-                    config = ./nix/bundle/nfpm-lldb.yaml;
-                  }
-                )
+          )
+          // mapKeysWithName (name: "pwndbg-lldb-portable-${name}") (
+            forPortables (
+              packager:
+              pkgUtil.${system}.buildPackagePFPM {
+                inherit packager;
+                drv = portableDrvLldb system;
+                config = ./nix/bundle/nfpm-lldb.yaml;
+              }
             )
+          )
         );
       tarballDrv = system: {
         "pwndbg-gdb-portable-tarball" = pkgUtil.${system}.buildPackageTarball { drv = portableDrv system; };

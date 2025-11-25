@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gdb
+import pytest
 from capstone.aarch64_const import AARCH64_INS_BL
 
 import pwndbg.aglib.disasm.disassembly
@@ -120,7 +121,7 @@ def test_aarch64_syscall_annotation(qemu_assembly_run):
     qemu_assembly_run(EXIT_SYSCALL, "aarch64")
 
     instructions = pwndbg.aglib.disasm.disassembly.near(
-        address=pwndbg.aglib.regs.pc, instructions=3, emulate=True
+        address=pwndbg.aglib.regs.pc, forward_count=3, emulate=True
     )[0]
     future_syscall_ins = instructions[2]
 
@@ -161,6 +162,38 @@ def test_aarch64_syscall_annotation(qemu_assembly_run):
     for i in instructions:
         assert i.syscall == 93
         assert i.syscall_name == "exit"
+
+
+def test_aarch64_be_disassembly(qemu_assembly_run):
+    """
+    Make sure disassembly of big-endian aarch64 is correct.
+    aarch64 instructions are always little-endian. The endianness refers to memory/register data layout.
+    """
+
+    qemu_assembly_run(EXIT_SYSCALL, "aarch64_be")
+
+    # Verify that it shows up in the output
+    dis = gdb.execute("context disasm", to_string=True)
+    dis = pwndbg.color.strip(dis)
+
+    expected = (
+        "LEGEND: STACK | HEAP | CODE | DATA | WX | RODATA\n"
+        "─────────────────────[ DISASM / aarch64 / set emulate on ]──────────────────────\n"
+        " ► 0x1010120 <_start>       mov    x0, #0            X0 => 0\n"
+        "   0x1010124 <_start+4>     mov    x8, #0x5d         X8 => 0x5d\n"
+        "   0x1010128 <_start+8>     svc    #0 <SYS_exit>\n"
+        "   0x101012c <_start+12>    nop    \n"
+        "   0x1010130 <_start+16>    nop    \n"
+        "   0x1010134 <_start+20>    nop    \n"
+        "   0x1010138 <_start+24>    nop    \n"
+        "   0x101013c <_start+28>    nop    \n"
+        "   0x1010140 <_start+32>    nop    \n"
+        "   0x1010144 <_start+36>    nop    \n"
+        "   0x1010148 <_start+40>    nop    \n"
+        "────────────────────────────────────────────────────────────────────────────────\n"
+    )
+
+    assert dis == expected
 
 
 CONDITIONAL_JUMPS = f"""
@@ -774,38 +807,89 @@ def test_aarch64_banned_instructions(qemu_assembly_run):
     assert dis == expected
 
 
+AARCH64_CROSS_ARCH_PATCH_INSTRUCTIONS = f"""
+{AARCH64_PREAMBLE}
+{AARCH64_GRACEFUL_EXIT}
+"""
+
+
+@pytest.mark.xfail(
+    reason="qemu-user 8.2.2 (version on Ubuntu24.04) does not support GDB writing to memory. This succeeds on newer versions of qemu. Remove the xfail when qemu is upgraded."
+)
+def test_aarch64_cross_arch_patch(qemu_assembly_run):
+    """
+    Make sure the `patch` command, which delegates to Zig to compile, works
+    """
+    qemu_assembly_run(AARCH64_CROSS_ARCH_PATCH_INSTRUCTIONS, "aarch64")
+
+    dis = gdb.execute("context disasm", to_string=True)
+    dis = pwndbg.color.strip(dis)
+
+    expected_before = (
+        "LEGEND: STACK | HEAP | CODE | DATA | WX | RODATA\n"
+        "─────────────────────[ DISASM / aarch64 / set emulate on ]──────────────────────\n"
+        " ► 0x1010120 <_start>       mov    x0, #0            X0 => 0\n"
+        "   0x1010124 <_start+4>     mov    x8, #0x5d         X8 => 0x5d\n"
+        "   0x1010128 <_start+8>     svc    #0 <SYS_exit>\n"
+        "   0x101012c <_start+12>    nop    \n"
+        "   0x1010130 <_start+16>    nop    \n"
+        "   0x1010134 <_start+20>    nop    \n"
+        "   0x1010138 <_start+24>    nop    \n"
+        "   0x101013c <_start+28>    nop    \n"
+        "   0x1010140 <_start+32>    nop    \n"
+        "   0x1010144 <_start+36>    nop    \n"
+        "   0x1010148 <_start+40>    nop    \n"
+        "────────────────────────────────────────────────────────────────────────────────\n"
+    )
+
+    assert dis == expected_before
+
+    gdb.execute("patch $pc 'nop; nop; nop'")
+
+    dis = gdb.execute("context disasm", to_string=True)
+    dis = pwndbg.color.strip(dis)
+
+    expected_after = (
+        "LEGEND: STACK | HEAP | CODE | DATA | WX | RODATA\n"
+        "─────────────────────[ DISASM / aarch64 / set emulate on ]──────────────────────\n"
+        " ► 0x1010120 <_start>       nop    \n"
+        "   0x1010124 <_start+4>     nop    \n"
+        "   0x1010128 <_start+8>     nop    \n"
+        "   0x101012c <_start+12>    nop    \n"
+        "   0x1010130 <_start+16>    nop    \n"
+        "   0x1010134 <_start+20>    nop    \n"
+        "   0x1010138 <_start+24>    nop    \n"
+        "   0x101013c <_start+28>    nop    \n"
+        "   0x1010140 <_start+32>    nop    \n"
+        "   0x1010144 <_start+36>    nop    \n"
+        "   0x1010148 <_start+40>    nop    \n"
+        "────────────────────────────────────────────────────────────────────────────────\n"
+    )
+
+    assert dis == expected_after
+
+
 REFERENCE_BINARY = get_binary("reference-binary.aarch64.out")
 
 
 def test_aarch64_reference(qemu_start_binary):
     qemu_start_binary(REFERENCE_BINARY, "aarch64")
-    gdb.execute("break break_here")
+    gdb.execute("break *main")
     assert pwndbg.aglib.symbol.lookup_symbol("main") is not None
     gdb.execute("continue")
+
+    # verify call argument are enriched
+    gdb.execute("stepuntilasm bl")
+    assembly = gdb.execute("nearpc", to_string=True)
+    assert "'Not enough args'" in assembly
 
     gdb.execute("argv", to_string=True)
     assert gdb.execute("argc", to_string=True).strip() == "1"
     gdb.execute("auxv", to_string=True)
     assert (
         gdb.execute("cpsr", to_string=True, from_tty=False).strip()
-        == "cpsr 0x0 [ n z c v q pan il d a i f el sp ]"
+        == "cpsr 0x60000000 [ n Z C v q pan il d a i f el sp ]"
     )
-    gdb.execute("context", to_string=True)
-    gdb.execute("hexdump", to_string=True)
-    gdb.execute("telescope", to_string=True)
-
-    # TODO: Broken
-    gdb.execute("retaddr", to_string=True)
-
-    # Broken
-    gdb.execute("procinfo", to_string=True)
-
-    # Broken
-    gdb.execute("vmmap", to_string=True)
-
-    gdb.execute("piebase", to_string=True)
-
-    gdb.execute("nextret", to_string=True)
 
 
 def test_memory_read_error_handling(qemu_assembly_run):

@@ -214,7 +214,7 @@ Binary Ninja XML-RPC server port.
 
 
 
-**Default:** 31337  
+**Default:** 43717  
 
 ----------
 
@@ -684,7 +684,7 @@ Ida xmlrpc server port.
 
 
 
-**Default:** 31337  
+**Default:** 43718  
 
 ----------
 
@@ -803,6 +803,17 @@ Max display size for heap chunks visualization (0 for display all).
 
 ----------
 
+## **nearpc-backwards-lines**
+
+
+Number of lines before the pc to print for the nearpc command.
+
+
+
+**Default:** 5  
+
+----------
+
 ## **nearpc-integration-comments**
 
 
@@ -817,7 +828,7 @@ Whether to show comments from integration provider.
 ## **nearpc-lines**
 
 
-Number of additional lines to print for the nearpc command.
+Number of lines to print for the nearpc command.
 
 
 
@@ -855,6 +866,28 @@ Whether to show call arguments below instruction.
 
 
 **Default:** on  
+
+----------
+
+## **objc-max-function-arguments**
+
+
+Maximum number of arguments to resolve for an Objective-C method call.
+
+
+
+**Default:** 32  
+
+----------
+
+## **objc-max-function-types-depth**
+
+
+Maximum allowed depth for a type in an Objective-C method call.
+
+
+
+**Default:** 32  
 
 ----------
 

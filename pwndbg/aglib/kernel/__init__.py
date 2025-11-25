@@ -28,6 +28,7 @@ import pwndbg.lib.kernel.structs
 import pwndbg.lib.memory
 import pwndbg.search
 from pwndbg.aglib.kernel.paging import ArchPagingInfo
+from pwndbg.aglib.kernel.paging import PageTableLevel
 from pwndbg.lib.regs import BitFlags
 
 _kconfig: pwndbg.lib.kernel.kconfig.Kconfig | None = None
@@ -115,10 +116,26 @@ def first_kernel_ro_page() -> pwndbg.lib.memory.Page | None:
     if base is None:
         return None
 
-    for mapping in pwndbg.aglib.kernel.paging.get_memory_map_raw():
+    banner = pwndbg.aglib.symbol.lookup_symbol_addr("linux_banner")
+    fallback_mappings = []
+    for mapping in pwndbg.aglib.kernel.vmmap.kernel_vmmap_pages():
         if mapping.vaddr < base:
             continue
+        if banner is not None and banner in mapping:
+            return mapping
+        if not mapping.read or mapping.write or mapping.execute:
+            fallback_mappings.append(mapping)
+            continue
 
+        result = next(pwndbg.search.search(b"Linux version", mappings=[mapping]), None)
+
+        if result:
+            return mapping
+    # optimization: observe that the first Linux kernel region is the kernel text so search it last
+    # it now finds the first ro page almost instantly even for kernels that are partially initialized
+    for mapping in fallback_mappings[1:] + [fallback_mappings[0]]:
+        # this loop handles when the kernel has not finished initialization
+        # and the permission of the first ro page has not been properly set
         result = next(pwndbg.search.search(b"Linux version", mappings=[mapping]), None)
 
         if result:
@@ -136,6 +153,8 @@ def kconfig() -> pwndbg.lib.kernel.kconfig.Kconfig | None:
         config_end = pwndbg.aglib.symbol.lookup_symbol_addr("kernel_config_data_end")
     else:
         mapping = first_kernel_ro_page()
+        if mapping is None:
+            return None
         result = next(pwndbg.search.search(b"IKCFG_ST", mappings=[mapping]), None)
 
         if result is not None:
@@ -161,7 +180,7 @@ def kcmdline() -> str:
 
 
 @pwndbg.lib.cache.cache_until("start")
-def kversion() -> str:
+def kversion() -> str | None:
     try:
         if has_debug_symbols("linux_banner"):
             version_addr = pwndbg.aglib.symbol.lookup_symbol_addr("linux_banner")
@@ -260,6 +279,10 @@ class ArchOps(ABC):
         return arch_paginginfo().physmap
 
     @property
+    def phys_offset(self) -> int:
+        return arch_paginginfo().phys_offset
+
+    @property
     def page_shift(self) -> int:
         return arch_paginginfo().page_shift
 
@@ -290,9 +313,6 @@ class ArchOps(ABC):
 
     def page_to_phys(self, page: int) -> int:
         return pfn_to_phys(page_to_pfn(page))
-
-    def page_to_physmap(self, page: int) -> int:
-        return page_to_phys(page) + self.page_offset
 
     def virt_to_page(self, virt: int) -> int:
         return pfn_to_page(virt_to_pfn(virt))
@@ -365,9 +385,12 @@ class x86_64Ops(x86Ops):
         return pwndbg.dbg.selected_inferior().create_value(per_cpu_addr)
 
     def virt_to_phys(self, virt: int) -> int:
-        if self.kbase is None or virt < self.kbase:
-            return (virt - self.page_offset) % (1 << 64)
-        return ((virt - self.kbase) + self.phys_base) % (1 << 64)
+        if not (pwndbg.aglib.memory.is_kernel(virt) and virt < arch_paginginfo().vmalloc):
+            # if not within physmap range, first find the physmap address
+            virt = pagewalk(virt)[0].virt
+        if virt is None:
+            return None
+        return virt - self.page_offset
 
     def pfn_to_page(self, pfn: int) -> int:
         # assumption: SPARSEMEM_VMEMMAP memory model used
@@ -401,10 +424,16 @@ class Aarch64Ops(ArchOps):
         return pwndbg.dbg.selected_inferior().create_value(per_cpu_addr)
 
     def virt_to_phys(self, virt: int) -> int:
-        return virt - self.page_offset
+        if not (pwndbg.aglib.memory.is_kernel(virt) and virt < arch_paginginfo().vmalloc):
+            # if not within physmap range, first find the physmap address
+            virt = pagewalk(virt)[0].virt
+        if virt is None:
+            return None
+        return virt - self.page_offset + self.phys_offset
 
     def phys_to_virt(self, phys: int) -> int:
-        return phys + self.page_offset
+        # https://elixir.bootlin.com/linux/v6.16.4/source/arch/arm64/include/asm/memory.h#L356
+        return phys - self.phys_offset + self.page_offset
 
     def phys_to_pfn(self, phys: int) -> int:
         return phys >> self.page_shift
@@ -544,14 +573,6 @@ def page_to_phys(page: int) -> int:
         raise NotImplementedError()
 
 
-def page_to_physmap(page: int) -> int:
-    ops = arch_ops()
-    if ops:
-        return ops.page_to_physmap(page)
-    else:
-        raise NotImplementedError()
-
-
 def virt_to_page(virt: int) -> int:
     ops = arch_ops()
     if ops:
@@ -593,7 +614,8 @@ def kbase() -> int | None:
         raise NotImplementedError()
 
 
-def pagewalk(addr, entry=None):
+@pwndbg.lib.cache.cache_until("stop")
+def pagewalk(addr, entry=None) -> Tuple[PageTableLevel, ...]:
     pi = arch_paginginfo()
     if pi:
         return pi.pagewalk(addr, entry)
@@ -668,4 +690,28 @@ def per_cpu_offset() -> pwndbg.dbg_mod.Value:
 def modules() -> pwndbg.dbg_mod.Value:
     if (syms := arch_symbols()) is not None:
         return syms.modules()
+    return None
+
+
+def db_list() -> pwndbg.dbg_mod.Value:
+    if (syms := arch_symbols()) is not None:
+        return syms.db_list()
+    return None
+
+
+def prog_idr() -> pwndbg.dbg_mod.Value:
+    if (syms := arch_symbols()) is not None:
+        return syms.prog_idr()
+    return None
+
+
+def map_idr() -> pwndbg.dbg_mod.Value:
+    if (syms := arch_symbols()) is not None:
+        return syms.map_idr()
+    return None
+
+
+def current_task() -> pwndbg.dbg_mod.Value:
+    if (syms := arch_symbols()) is not None:
+        return syms.current_task()
     return None

@@ -287,6 +287,19 @@ class BreakpointAdapter(gdb.Breakpoint):
         return self.stop_handler()
 
 
+class FinishpointAdapter(gdb.FinishBreakpoint):
+    stop_handler: Callable[[], bool]
+
+    def __init__(self, stop_handler, internal):
+        super().__init__(gdb.newest_frame(), internal)
+        self.stop_handler = stop_handler
+
+    @override
+    def stop(self) -> bool:
+        result = self.stop_handler()
+        return result
+
+
 class GDBStopPoint(pwndbg.dbg_mod.StopPoint):
     inner: gdb.Breakpoint
     proc: GDBProcess
@@ -835,6 +848,15 @@ class GDBProcess(pwndbg.dbg_mod.Process):
         return sp
 
     @override
+    def trace_ret(self, stop_handler: Callable[[], bool] | None = None, internal: bool = False):
+        if stop_handler is None:
+
+            def stop_handler():
+                return True
+
+        FinishpointAdapter(stop_handler, internal)
+
+    @override
     def is_linux(self) -> bool:
         # Detect current ABI of client side by 'show osabi'
         #
@@ -977,8 +999,15 @@ class GDBProcess(pwndbg.dbg_mod.Process):
                 break
 
     @override
-    def add_symbol_file(self, path, base):
+    def add_symbol_file(self, path, base=None):
+        if base is None:
+            gdb.execute(f"add-symbol-file {path}", to_string=True)
+            return
         gdb.execute(f"add-symbol-file {path} {base}")
+
+    @override
+    def runcmd(self, cmd) -> str:
+        return gdb.execute(cmd, to_string=True)
 
 
 class GDBExecutionController(pwndbg.dbg_mod.ExecutionController):
@@ -1418,47 +1447,6 @@ class GDB(pwndbg.dbg_mod.Debugger):
         for line in pre_commands.strip().splitlines():
             gdb.execute(line)
 
-        # See https://github.com/pwndbg/pwndbg/issues/2890#issuecomment-2813047212
-        # Note: Remove this in a late 2025 or 2026 release?
-        for deprecated_cmd in (
-            "vmmap_add",
-            "vmmap_clear",
-            "vmmap_load",
-            "vmmap_explore",
-            "vis_heap_chunks",
-            "heap_config",
-            "stack_explore",
-            "auxv_explore",
-            "log_level",
-            "find_fake_fast",
-            "malloc_chunk",
-            "top_chunk",
-            "try_free",
-            "save_ida",
-            "knft_dump",
-            "knft_list_chains",
-            "knft_list_exprs",
-            "knft_list_flowtables",
-            "knft_list_objects",
-            "knft_list_rules",
-            "knft_list_sets",
-            "knft_list_tables",
-            "patch_list",
-            "patch_revert",
-            "jemalloc_extent_info",
-            "jemalloc_find_extent",
-            "jemalloc_heap",
-        ):
-            fixed_cmd = deprecated_cmd.replace("_", "-")
-            gdb.execute(
-                f"alias -a {deprecated_cmd} = echo Use `{fixed_cmd}` instead (Pwndbg changed `_` to `-` in command names)\\n"
-            )
-
-        for deprecated_cmd, new_cmd in (("pcplist", "buddydump"),):
-            gdb.execute(
-                f"alias -a {deprecated_cmd} = echo deprecation warning for old name, use `{new_cmd}` instead\\n"
-            )
-
         # This may throw an exception, see pwndbg/pwndbg#27
         try:
             gdb.execute("set disassembly-flavor intel")
@@ -1678,6 +1666,11 @@ class GDB(pwndbg.dbg_mod.Debugger):
             return pwndbg.gdblib.events.reg_changed
         elif ty == pwndbg.dbg_mod.EventType.SUSPEND_ALL:
             raise RuntimeError("invalid usage, this event is not supported")
+
+    @override
+    @contextmanager
+    def ctx_suspend_once(self):
+        pwndbg.gdblib.prompt.context_shown = True
 
     @override
     def suspend_events(self, ty: pwndbg.dbg_mod.EventType) -> None:

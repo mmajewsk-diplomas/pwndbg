@@ -20,6 +20,8 @@ from capstone import CS_MODE_16
 from capstone import CS_MODE_32
 from capstone import CS_MODE_64
 from capstone import CS_MODE_ARM
+from capstone import CS_MODE_BIG_ENDIAN
+from capstone import CS_MODE_LITTLE_ENDIAN
 from capstone import CS_MODE_LOONGARCH64
 from capstone import CS_MODE_MCLASS
 from capstone import CS_MODE_MIPS32
@@ -67,6 +69,12 @@ def get_pwndbg_architecture(name: PWNDBG_SUPPORTED_ARCHITECTURES_TYPE) -> Pwndbg
     return registered_architectures[name]
 
 
+CAPSTONE_ENDIAN_MAPPING: Dict[EndianType, int] = {
+    "little": CS_MODE_LITTLE_ENDIAN,
+    "big": CS_MODE_BIG_ENDIAN,
+}
+
+
 class PwndbgArchitecture(ArchDefinition):
     """
     This class defines the context of the currently debugged architecture as well as other related information of the platform.
@@ -80,6 +88,7 @@ class PwndbgArchitecture(ArchDefinition):
 
     max_instruction_size: int
     instruction_alignment: int
+    constant_instruction_size: bool = False
 
     ###
 
@@ -155,6 +164,9 @@ class PwndbgArchitecture(ArchDefinition):
         Return tuple of (CAPSTONE ARCH, CAPSTONE MODE) used to instantiate the Capstone disassembler for this architecture.
         """
         return None
+
+    def get_capstone_endianness(self) -> int:
+        return CAPSTONE_ENDIAN_MAPPING[self.endian]
 
     def read_thumb_bit(self) -> Literal[0, 1, None]:
         """
@@ -264,6 +276,7 @@ class ArmCortexArch(PwndbgArchitecture):
 class AArch64Arch(PwndbgArchitecture):
     max_instruction_size = 4
     instruction_alignment = 4
+    constant_instruction_size = True
 
     def __init__(self) -> None:
         super().__init__("aarch64")
@@ -271,6 +284,10 @@ class AArch64Arch(PwndbgArchitecture):
     @override
     def get_capstone_constants(self, address: int) -> Tuple[int, int]:
         return (CS_ARCH_AARCH64, CS_MODE_ARM)
+
+    @override
+    def get_capstone_endianness(self) -> int:
+        return CS_MODE_LITTLE_ENDIAN
 
 
 class PowerPCArch(PwndbgArchitecture):
@@ -345,6 +362,7 @@ class MipsArch(PwndbgArchitecture):
 class Loongarch64Arch(PwndbgArchitecture):
     max_instruction_size = 4
     instruction_alignment = 4
+    constant_instruction_size = True
 
     def __init__(self) -> None:
         super().__init__("loongarch64")
