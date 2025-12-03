@@ -192,6 +192,22 @@ def stack(offset: gdb.Value = gdb.Value(0)) -> int:
     return int(base_addr) + int(offset)
 
 
+def _resolve_symbol_address(candidates: list[str]) -> int | None:
+    """
+    Try to resolve any of the given symbol names to an int address.
+    Returns the address, or None if none of them can be resolved.
+    """
+    for name in candidates:
+        for expr in (name, f"&{name}"):
+            try:
+                val = gdb.parse_and_eval(expr)
+            except gdb.error:
+                continue
+            return int(val)
+
+    return None
+
+
 @GdbFunction(only_when_running=True)
 def bss(offset: gdb.Value = gdb.Value(0)) -> int:
     """
@@ -209,22 +225,15 @@ def bss(offset: gdb.Value = gdb.Value(0)) -> int:
         "__bss_start",
         "_bss_start",
         "__bss_start__",
-        "_edata",
         "bss_start",
+        "_edata",
     ]
 
-    for name in bss_symbols:
-        try:
-            val = gdb.parse_and_eval(name)
-            return int(val) + int(offset)
-        except Exception:
-            try:
-                val = gdb.parse_and_eval(f"&{name}")
-                return int(val) + int(offset)
-            except Exception:
-                continue
+    base = _resolve_symbol_address(bss_symbols)
+    if base is None:
+        raise gdb.GdbError("$bss error: could not find a known bss symbol.")
 
-    raise gdb.GdbError("$bss error: could not find a known bss symbol. ")
+    return base + int(offset)
 
 
 @GdbFunction(only_when_running=True)
@@ -248,17 +257,11 @@ def got(offset: gdb.Value = gdb.Value(0)) -> int:
         "__got_start",
     ]
 
-    for name in got_symbols:
-        try:
-            val = gdb.parse_and_eval(name)
-            return int(val) + int(offset)
-        except Exception:
-            try:
-                val = gdb.parse_and_eval(f"&{name}")
-                return int(val) + int(offset)
-            except Exception:
-                continue
-    raise gdb.GdbError("$got error: could not find a known GOT symbol. ")
+    base = _resolve_symbol_address(got_symbols)
+    if base is None:
+        raise gdb.GdbError("$got error: could not find a known GOT symbol.")
+
+    return base + int(offset)
 
 
 @GdbFunction()
