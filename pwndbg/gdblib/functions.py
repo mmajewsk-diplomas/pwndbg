@@ -16,6 +16,7 @@ import gdb
 import pwndbg.aglib.argv
 import pwndbg.aglib.elf
 import pwndbg.aglib.proc
+import pwndbg.aglib.symbol
 import pwndbg.aglib.typeinfo
 import pwndbg.aglib.vmmap
 from pwndbg.lib.common import hex2ptr_common
@@ -162,8 +163,8 @@ def heap(offset: gdb.Value = gdb.Value(0)) -> int:
     0x555555559018:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
     ```
     """
-    base_addr = gdb.parse_and_eval('$base("heap")')
-    return int(base_addr) + int(offset)
+    heap_base = base("[heap]")
+    return int(heap_base) + int(offset)
 
 
 @GdbFunction(only_when_running=True)
@@ -188,8 +189,8 @@ def stack(offset: gdb.Value = gdb.Value(0)) -> int:
     0x7ffffffde000:	0x0000000000000000
     ```
     """
-    base_addr = gdb.parse_and_eval('$base("stack")')
-    return int(base_addr) + int(offset)
+    stack_base = base("[stack]")
+    return int(stack_base) + int(offset)
 
 
 def _resolve_symbol_address(candidates: list[str]) -> int | None:
@@ -198,12 +199,9 @@ def _resolve_symbol_address(candidates: list[str]) -> int | None:
     Returns the address, or None if none of them can be resolved.
     """
     for name in candidates:
-        for expr in (name, f"&{name}"):
-            try:
-                val = gdb.parse_and_eval(expr)
-            except gdb.error:
-                continue
-            return int(val)
+        addr = pwndbg.aglib.symbol.lookup_symbol_addr(name)
+        if addr is not None:
+            return addr
 
     return None
 
