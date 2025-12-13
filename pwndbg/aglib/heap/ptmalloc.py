@@ -513,10 +513,9 @@ class Heap:
                 raise ValueError(f"Cannot build heap object on an unmapped address ({hex(addr)})")
 
             heap_info = allocator.get_heap(addr)
-            try:
+            ar_ptr = None
+            if heap_info is not None:
                 ar_ptr = int(heap_info["ar_ptr"])
-            except pwndbg.dbg_mod.Error:
-                ar_ptr = None
 
             if ar_ptr is not None and ar_ptr in (ar.address for ar in allocator.arenas):
                 # Case 2; non-main arena.
@@ -1713,7 +1712,10 @@ class DebugSymsHeap(GlibcMemoryAllocator[pwndbg.dbg_mod.Type, pwndbg.dbg_mod.Val
         """Find & read the heap_info struct belonging to the chunk at 'addr'."""
         if self.heap_info is None:
             return None
-        return pwndbg.aglib.memory.get_typed_pointer_value(self.heap_info, heap_for_ptr(addr))
+        haddr = heap_for_ptr(addr)
+        if pwndbg.aglib.memory.peek(haddr) is None:
+            return None
+        return pwndbg.aglib.memory.get_typed_pointer_value(self.heap_info, haddr)
 
     def get_tcache(
         self, tcache_addr: int | pwndbg.dbg_mod.Value | None = None

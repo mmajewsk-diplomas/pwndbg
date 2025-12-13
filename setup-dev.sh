@@ -158,12 +158,15 @@ EOF
 install_dnf() {
     sudo dnf upgrade || true
     sudo dnf install -y \
+        make \
         nasm \
         gcc \
         curl \
         wget \
-        gdb \
+        musl-gcc \
+        g++ \
         parallel \
+        qemu-system-x86 \
         qemu-system-arm \
         qemu-user
 
@@ -176,7 +179,7 @@ install_dnf() {
     command -v go &> /dev/null || sudo dnf install -y go
 
     if [[ "$1" != "" ]]; then
-        sudo dnf install shfmt
+        sudo dnf install -y shfmt
     fi
 }
 
