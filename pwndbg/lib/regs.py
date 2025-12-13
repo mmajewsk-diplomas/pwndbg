@@ -176,6 +176,12 @@ class Reg:
     zero_extend_writes: bool = False
     """Upon writing a value to this subregister, are the higher bits of the full register zeroed out?"""
     subregisters: tuple[Reg, ...] = ()
+    """Bitmask for register. None if the register size is arch.ptrsize"""
+    mask: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.size:
+            self.mask = (1 << (self.size * 8)) - 1
 
 
 class RegisterSet:
@@ -224,6 +230,13 @@ class RegisterSet:
     Example mapping: "eax" -> Reg("rax")
 
     A full size register maps to itself.
+    """
+
+    special_aliases: Dict[str, str]
+    """
+    Contains two values:
+    - "sp" -> stack pointer register name
+    - "pc" -> instruction pointer register name
     """
 
     def __init__(
@@ -314,6 +327,17 @@ class RegisterSet:
         )
         self.all -= {None}
         self.all |= {"pc", "sp"}
+
+        self.special_aliases = {}
+        self.special_aliases["sp"] = self.stack
+        self.special_aliases["pc"] = self.pc
+
+    def resolve_aliases(self, reg: str) -> str:
+        """
+        Convert "sp" and "pc" to the real architectural registers.
+        For all others, returns `reg`
+        """
+        return self.special_aliases.get(reg, reg)
 
     def __contains__(self, reg: str) -> bool:
         return reg in self.all
