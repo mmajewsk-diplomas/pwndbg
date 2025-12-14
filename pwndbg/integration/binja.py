@@ -28,8 +28,7 @@ from typing_extensions import ParamSpec
 from typing_extensions import override
 
 import pwndbg
-import pwndbg.aglib.arch
-import pwndbg.aglib.elf
+import pwndbg.aglib
 import pwndbg.aglib.proc
 import pwndbg.aglib.regs
 import pwndbg.aglib.symbol
@@ -43,9 +42,9 @@ from pwndbg.aglib.nearpc import c as nearpc_color
 from pwndbg.aglib.nearpc import ljust_padding
 from pwndbg.color import message
 from pwndbg.color import theme
-from pwndbg.dbg import BreakpointLocation
-from pwndbg.dbg import EventType
-from pwndbg.dbg import StopPoint
+from pwndbg.dbg_mod import BreakpointLocation
+from pwndbg.dbg_mod import EventType
+from pwndbg.dbg_mod import StopPoint
 from pwndbg.lib.functions import Argument
 from pwndbg.lib.functions import Function
 

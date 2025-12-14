@@ -547,7 +547,7 @@ async def test_context_history_prev_next(ctrl: Controller) -> None:
 
 @pwndbg_test
 async def test_context_history_search(ctrl: Controller) -> None:
-    import pwndbg.aglib.arch
+    import pwndbg.aglib
 
     await ctrl.launch(REFERENCE_BINARY)
     if pwndbg.aglib.arch.name != "x86-64":
@@ -632,7 +632,7 @@ async def test_stack_variable_names_from_dwarf(ctrl: Controller) -> None:
     """
     import pwndbg.aglib.stack
     import pwndbg.commands.context
-    import pwndbg.dbg
+    import pwndbg.dbg_mod
 
     # Launch directly to inner_function where the variables are
     await launch_to(ctrl, STACK_VARS_BINARY, "inner_function")
