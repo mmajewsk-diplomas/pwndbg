@@ -6,49 +6,57 @@ import difflib
 import pwndbg.color.message as message
 import pwndbg.commands
 from pwndbg.commands import CommandCategory
-from pwndbg.commands.saveoutput import last_command
-from pwndbg.commands.saveoutput import saved_outputs
-
-if pwndbg.dbg.is_gdblib_available():
-    import gdb
+from pwndbg.commands.saveoutput import last_command, saved_outputs, snapshot_registers, snapshot_vmmap
 
 diff_parser = argparse.ArgumentParser(
-    description="Compare the current output of a command to its saved version."
+    description="Compare current snapshot output to its saved version."
 )
 
 diff_parser.add_argument(
     "args",
     nargs=argparse.REMAINDER,
     type=str,
-    help="Command plus arguments to execute and diff",
+    help="Snapshot name (registers|vmmap).",
 )
 
 
 @pwndbg.commands.Command(diff_parser, category=CommandCategory.MISC)
 def diffoutput(args: list[str]) -> None:
     global saved_outputs, last_command
-    if args:
-        cmd = " ".join(args)
-    else:
+
+    what = args[0] if args else None
+    if not what:
         if not last_command:
-            print(message.error("No previous command to diff."))
+            print(message.error("No previous snapshot to diff."))
             return
-        cmd = last_command
-    if cmd not in saved_outputs:
-        print(message.error(f"No saved output for command: '{cmd}'"))
+        what = last_command
+
+    if what not in saved_outputs:
+        print(message.error(f"No saved output for snapshot: '{what}'"))
         return
 
     try:
-        current = gdb.execute(cmd, to_string=True)
-    except gdb.error as e:
-        print(message.error(f"Failed to execute command: {e}"))
+        if what == "registers":
+            current = snapshot_registers()
+        elif what == "vmmap":
+            current = snapshot_vmmap()
+        else:
+            print(message.error(f"Unsupported snapshot: '{what}' (use: registers|vmmap)"))
+            return
+    except Exception as e:
+        print(message.error(f"Failed to capture snapshot: {e}"))
         return
 
-    saved = saved_outputs[cmd]
+    saved = saved_outputs[what]
     diff = difflib.unified_diff(
-        saved.splitlines(), current.splitlines(), fromfile="saved", tofile="current", lineterm=""
+        saved.splitlines(),
+        current.splitlines(),
+        fromfile="saved",
+        tofile="current",
+        lineterm="",
     )
     result = "\n".join(diff)
+
     if result:
         print(message.notice("Differences:\n" + result))
     else:
