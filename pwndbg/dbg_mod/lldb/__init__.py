@@ -3,6 +3,7 @@ from __future__ import annotations
 import bisect
 import collections
 import enum
+import functools
 import os
 import random
 import re
@@ -28,8 +29,10 @@ from typing_extensions import override
 
 import pwndbg
 import pwndbg.color.message as M
+import pwndbg.dbg_mod
 import pwndbg.lib.memory
 from pwndbg.aglib import load_aglib
+from pwndbg.dbg_mod import EventHandlerPriority
 from pwndbg.dbg_mod import selection
 from pwndbg.lib.arch import ArchDefinition
 from pwndbg.lib.arch import Platform
@@ -300,6 +303,39 @@ class LLDBFrame(pwndbg.dbg_mod.Frame):
         other: LLDBFrame = rhs
 
         return self.inner == other.inner
+
+    @override
+    def idx(self) -> int:
+        # https://lldb.llvm.org/python_api/lldb.SBFrame.html#lldb.SBFrame.idx
+        return self.inner.idx
+
+    @override
+    def __hash__(self) -> int:
+        # There is a GetFrameID API [1], but it isn't really documented
+        # and looking at its implementation [2] does not fill me with confidence.
+        # Looking at the SBFrame equality check [3], it uses StackFrame.GetStackID()
+        # [4] which updates and returns StackFrame.m_id the comparison of which is
+        # implemented here [5]. But I don't see how it guarantees that two frames at
+        # the same stack and pc but at different times will be different. Maybe it
+        # just doesn't?
+        # In any case the StackID class doesn't expose an integer, so we are rolling
+        # our own thing.
+        # [1] https://lldb.llvm.org/python_api/lldb.SBFrame.html#lldb.SBFrame.GetFrameID
+        # [2] https://github.com/llvm/llvm-project/blob/1deee91bf52ca15e47b59a2929e5e5a323f4864c/lldb/source/API/SBFrame.cpp#L255
+        # [3] https://github.com/llvm/llvm-project/blob/1deee91bf52ca15e47b59a2929e5e5a323f4864c/lldb/source/API/SBFrame.cpp#L585
+        # [4] https://github.com/llvm/llvm-project/blob/1deee91bf52ca15e47b59a2929e5e5a323f4864c/lldb/source/Target/StackFrame.cpp#L154
+        # [5] https://github.com/llvm/llvm-project/blob/1deee91bf52ca15e47b59a2929e5e5a323f4864c/lldb/source/Target/StackID.cpp#L53
+        # I think a (number of stops, thread index, frame index) tuple uniquely identifies a stack frame.
+        # There probably won't be >= 65,536 stack frames in a thread stack, or
+        # >= 65,536 threads in a process.
+        # The `pwndbg.dbg_mod.number_of_stops_since_birth` part might not be necessary, because
+        # if you are comparing frames from different stops that means your code is buggy; but it
+        # lets me sleep at night better.
+        return (
+            self.idx()
+            + (self.inner.thread.idx << 16)
+            + (pwndbg.dbg_mod.number_of_stops_since_birth << 32)
+        )
 
 
 class LLDBThread(pwndbg.dbg_mod.Thread):
@@ -1913,7 +1949,9 @@ class LLDB(pwndbg.dbg_mod.Debugger):
 
     # We keep track of all installed event handlers here. The REPL will trigger
     # them by means of the `_trigger_event()` method.
-    event_handlers: Dict[pwndbg.dbg_mod.EventType, List[Callable[..., T]]]
+    event_handlers: Dict[
+        pwndbg.dbg_mod.EventType, Dict[EventHandlerPriority, List[Callable[..., None]]]
+    ]
 
     # Event types may be suspended. We keep track of that here.
     suspended_events: Dict[pwndbg.dbg_mod.EventType, bool]
@@ -1979,7 +2017,9 @@ class LLDB(pwndbg.dbg_mod.Debugger):
 
         pwndbg.commands.comments.init()
 
-        import pwndbg.dbg_mod.lldb.hooks
+        # Register event hooks.
+        # (We can't do them in this file because pwndbg.dbg isn't initialized yet.)
+        from pwndbg.dbg_mod.lldb import hooks as hooks
 
     def relay_exceptions(self) -> None:
         """
@@ -2188,15 +2228,34 @@ class LLDB(pwndbg.dbg_mod.Debugger):
 
     @override
     def event_handler(
-        self, ty: pwndbg.dbg_mod.EventType
-    ) -> Callable[[Callable[..., T]], Callable[..., T]]:
-        def decorator(fn: Callable[..., T]) -> Callable[..., T]:
-            if ty not in self.event_handlers:
-                self.event_handlers[ty] = []
+        self,
+        event_type: pwndbg.dbg_mod.EventType,
+        priority: EventHandlerPriority = EventHandlerPriority.STANDARD,
+    ) -> Callable[[Callable[..., None]], Callable[..., None]]:
+        # Note that event_handler is actually a decorator factory and
+        # not a decorator itself - it returns a decorator which is then
+        # immediately applied to the function.
+        def decorator(fn: Callable[..., None]) -> Callable[..., None]:
+            if pwndbg.config.dev_debug_events:
+                print("Connecting", fn.__name__, event_type.name)
 
-            # [...] incompatible type "Callable[..., T]"; expected "Callable[..., T]"
-            self.event_handlers[ty].append(fn)  # type: ignore[arg-type]
-            return fn
+            if event_type not in self.event_handlers:
+                self.event_handlers[event_type] = {priority: []}
+            elif priority not in self.event_handlers[event_type]:
+                self.event_handlers[event_type][priority] = []
+
+            # Wrap the function for dev instrumentation
+            @functools.wraps(fn)
+            def _dev_wrapper(*a, **kw) -> None:
+                if pwndbg.config.dev_debug_events:
+                    sys.stdout.write(
+                        f"{event_type.name} ({priority.name}) {fn.__module__}.{fn.__qualname__}\n"
+                    )
+
+                return fn(*a, **kw)
+
+            self.event_handlers[event_type][priority].append(_dev_wrapper)
+            return _dev_wrapper
 
         return decorator
 
@@ -2233,14 +2292,19 @@ class LLDB(pwndbg.dbg_mod.Debugger):
             # This event has been suspended.
             return
 
-        for handler in self.event_handlers[ty]:
-            try:
-                handler()
-            except Exception as e:
-                from pwndbg.exception import handle as pwndbg_exception
+        try:
+            # Run the handlers in order of their priority.
+            # We should optimize this by using a Dict[EventType, List[Tuple[EventHandlerPriority, Callable[..., None]]]]
+            # type for self.event_handlers, and sort it only once after everything is registered.
+            for prio in EventHandlerPriority:
+                handlers = self.event_handlers[ty].get(prio, [])
+                for handler in handlers:
+                    handler()
+        except Exception as e:
+            from pwndbg.exception import handle as pwndbg_exception
 
-                pwndbg_exception()
-                raise e
+            pwndbg_exception()
+            raise e
 
     @override
     def set_sysroot(self, sysroot: str) -> bool:
