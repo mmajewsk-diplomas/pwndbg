@@ -22,18 +22,18 @@ updates:
       prod-patch:
         patterns: ["*"]
         dependency-type: "production"
-        update-types: ["version-update:semver-patch"]
-
+        update-types: ["patch"]
+    
       prod-minor:
         patterns: ["*"]
         dependency-type: "production"
-        update-types: ["version-update:semver-minor"]
-
+        update-types: ["minor"]
+    
       prod-major:
         patterns: ["*"]
         dependency-type: "production"
-        update-types: ["version-update:semver-major"]
-
+        update-types: ["major"]
+    
       dev-updates:
         patterns: ["*"]
         dependency-type: "development"
