@@ -24,7 +24,7 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
 
       - name: Build derivation before update
-        run: nix build .#devShells.x86_64-linux.default --accept-flake-config -o ./before-update
+        run: nix build .#devShells.aarch64-linux.default --accept-flake-config -o ./before-update
 
       - name: Update flake.lock
         run: nix flake update
@@ -40,7 +40,7 @@ jobs:
 
       - name: Build derivation after update
         if: steps.changes.outputs.changed == 'true'
-        run: nix build .#devShells.x86_64-linux.default --accept-flake-config -o ./after-update
+        run: nix build .#devShells.aarch64-linux.default --accept-flake-config -o ./after-update
 
       - name: Install dix
         if: steps.changes.outputs.changed == 'true'
