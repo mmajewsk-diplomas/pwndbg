@@ -53,6 +53,8 @@ jobs:
           echo "DIFF<<EOF" >> $GITHUB_OUTPUT
           dix ./before-update ./after-update >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+          rm ./before-update
+          rm ./after-update
 
       - name: Create Pull Request
         if: steps.changes.outputs.changed == 'true'
@@ -75,4 +77,3 @@ jobs:
           delete-branch: true
           labels: |
             dependencies
-            nix
