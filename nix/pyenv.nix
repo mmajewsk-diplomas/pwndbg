@@ -80,6 +80,19 @@ let
     "pytest-cov"
     "mypy"
     "vermin"
+    # decomp2dbg deps
+    "decomp2dbg"
+    "ghidra-bridge"
+    "jfx-bridge"
+    "tqdm"
+    "toml"
+    "libbs"
+    "networkx"
+    "jpype1"
+    "pyhidra"
+    "ply"
+    # end of decomp2dbg deps
+    "niche-elf"
   ];
   pkgsNeedFlitcore = [
     "typing-extensions"
@@ -97,12 +110,16 @@ let
     "plumbum"
     "rpyc"
     "iniconfig"
+    # decomp2dbg deps
+    "decomp2dbg"
+    "filelock"
+    "platformdirs"
+    # end of decomp2dbg deps
   ];
   pkgsNeedPoetry = [
     "pt"
     "rich"
     "sortedcontainers-stubs"
-    "isort"
   ];
 
   genPkgsNeeded =
@@ -135,26 +152,9 @@ let
     uv = dummy;
 
     # ziglang is only supported on few platforms
-    ziglang =
-      if
-        (
-          pkgs.stdenv.hostPlatform.isDarwin
-          || (pkgs.stdenv.hostPlatform.isLinux && pkgs.stdenv.hostPlatform.isx86)
-          || (pkgs.stdenv.hostPlatform.isLinux && pkgs.stdenv.hostPlatform.isAarch)
-          || (pkgs.stdenv.hostPlatform.isLinux && pkgs.stdenv.hostPlatform.isS390x)
-          || (pkgs.stdenv.hostPlatform.isLinux && pkgs.stdenv.hostPlatform.isRiscV64)
-          || (
-            pkgs.stdenv.hostPlatform.isLinux
-            && pkgs.stdenv.hostPlatform.isPower64
-            && pkgs.stdenv.hostPlatform.isLittleEndian
-          )
-        )
-      then
-        prev.ziglang.override {
-          sourcePreference = "wheel";
-        }
-      else
-        dummy;
+    ziglang = prev.ziglang.override {
+      sourcePreference = "wheel";
+    };
 
     psutil = pkgs.callPackage (
       {
@@ -169,7 +169,13 @@ let
           buildInputs = [ python3 ];
         }
         // lib.optionalAttrs stdenv.hostPlatform.isDarwin {
-          NIX_CFLAGS_COMPILE = "-DkIOMainPortDefault=0";
+          postPatch = ''
+            # stick to the old SDK name for now
+            # https://developer.apple.com/documentation/iokit/kiomasterportdefault/
+            # https://developer.apple.com/documentation/iokit/kiomainportdefault/
+            substituteInPlace psutil/arch/osx/cpu.c \
+              --replace-fail kIOMainPortDefault kIOMasterPortDefault
+          '';
         }
       )
     ) { };
@@ -263,6 +269,37 @@ let
           ++ lib.optionals isCross [
             python3
           ];
+      })
+    ) { };
+
+    jfx-bridge = pkgs.callPackage (
+      { stdenv }:
+      prev.jfx-bridge.overrideAttrs (old: {
+        postPatch = ''
+          substituteInPlace ./setup.py \
+            --replace-fail 'git describe --tags' 'echo ${old.version}'
+        '';
+      })
+    ) { };
+
+    jpype1 = pkgs.callPackage (
+      { python3 }:
+      prev.jpype1.overrideAttrs (old: {
+        buildInputs =
+          (old.buildInputs or [ ])
+          ++ lib.optionals isCross [
+            python3
+          ];
+      })
+    ) { };
+
+    ghidra-bridge = pkgs.callPackage (
+      { }:
+      prev.ghidra-bridge.overrideAttrs (old: {
+        postPatch = ''
+          substituteInPlace ./setup.py \
+            --replace-fail 'git describe --tags' 'echo ${old.version}'
+        '';
       })
     ) { };
 
