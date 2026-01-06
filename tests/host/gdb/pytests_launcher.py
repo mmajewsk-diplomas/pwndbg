@@ -26,6 +26,9 @@ class _GDBController(host.Controller):
         GDB hides the asynchronous heavy lifting from us, so this call is
         synchronous.
         """
+        if not os.path.exists(binary_path):
+            pytest.skip(f"{os.path.basename(binary_path)} does not exist. Platform not supported.")
+
         os.environ["PWNDBG_IN_TEST"] = "1"
         gdb.execute(f"file {binary_path}")
         gdb.execute("set exception-verbose on")
@@ -40,7 +43,7 @@ class _GDBController(host.Controller):
         gdb.execute("continue")
 
     async def execute(self, command: str) -> None:
-        from pwndbg.dbg import Error
+        from pwndbg.dbg_mod import Error
 
         try:
             gdb.execute(command)

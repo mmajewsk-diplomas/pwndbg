@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import re
 
+from ....host import Controller
 from . import break_at_sym
 from . import get_binary
 from . import get_expr
 from . import pwndbg_test
 
-LINKED_LISTS_BINARY = get_binary("linked-lists.out")
+LINKED_LISTS_BINARY = get_binary("linked-lists.native.out")
 
 
 async def startup(ctrl: Controller):
