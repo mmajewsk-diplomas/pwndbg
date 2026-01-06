@@ -440,15 +440,27 @@ def soft_connection_check(also_sync: bool) -> bool:
     return True
 
 
+def check_alive(error_msg: str) -> bool:
+    try:
+        inf = pwndbg.dbg.selected_inferior()
+
+        if not inf.alive():
+            # A bit hacky but whatever.
+            raise pwndbg.dbg_mod.NoInferior
+
+        return True
+    except pwndbg.dbg_mod.NoInferior:
+        print(message.error(error_msg))
+        return False
+
+
 def jump(addr: Optional[int]) -> None:
     if not pwndbg.integration.manager.is_connected():
         print(message.error("Not connected to a decompiler."))
         print(message.hint("Try `di connect`."))
         return
 
-    # Check if the process is alive
-    if (inf := pwndbg.dbg.selected_inferior()) is None or not inf.alive():
-        print(message.error("Can only jump to address while the process is alive."))
+    if not check_alive("Can only jump to address while the process is alive."):
         return
 
     if addr is None:
@@ -478,10 +490,9 @@ def sync(fail_quietly: bool) -> None:
         if not soft_connection_check(also_sync=False):
             return
 
-    # Check if the process is alive
-    if (inf := pwndbg.dbg.selected_inferior()) is None or not inf.alive():
-        if not fail_quietly:
-            print(message.notice("Can only sync with the debugger while the process is alive."))
+    if not check_alive(
+        "" if fail_quietly else "Can only sync with the debugger while the process is alive."
+    ):
         return
 
     print("Syncing symbols. It may take a while.")
@@ -600,9 +611,7 @@ def list_(list_all: bool) -> None:
     if not soft_connection_check(also_sync=True):
         return
 
-    # Check if the process is alive
-    if (inf := pwndbg.dbg.selected_inferior()) is None or not inf.alive():
-        print(message.error("Can only list function variables if the process is alive."))
+    if not check_alive("Can only list function variables if the process is alive."):
         return
 
     if list_all:
