@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import pytest
-
 from ....host import Controller
 from . import pwndbg_test
 
@@ -13,6 +11,7 @@ async def test_setrlimit_unknown_resource(ctrl: Controller) -> None:
     result = await ctrl.execute_and_capture("setrlimit unknown 1")
 
     assert "Unknown resource 'unknown'" in result
+
 
 @pwndbg_test
 async def test_setrlimit_invalid_value(ctrl: Controller) -> None:
