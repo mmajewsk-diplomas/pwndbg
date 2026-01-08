@@ -1,43 +1,65 @@
 from __future__ import annotations
 
-import pwndbg
-import pwndbg.commands.saveoutput as so
+import pwndbg.commands.saveoutput
+from pwndbg.commands.saveoutput import saved_outputs
+
+from . import get_binary
+
+import gdb
+
+REFERENCE_BINARY = get_binary("reference-binary.out")
 
 
-class DummyRegSet:
-    gpr = ("rax", "rbx")
-    args = ("rdi",)
-    pc = "rip"
-    stack = "rsp"
+def test_saveoutput_joins_args_correctly(start_binary):
+    pwndbg.commands.saveoutput.saved_outputs.clear()
+    pwndbg.commands.saveoutput.last_command = None
+
+    start_binary(REFERENCE_BINARY)
+    gdb.execute("break main")
+    gdb.execute("run")
+
+    pwndbg.commands.saveoutput.saveoutput(["info", "registers"])
+
+    assert "info registers" in saved_outputs
 
 
-class DummyRegs:
-    def __init__(self, values: dict[str, int]):
-        self._values = values
+def test_saveoutput_saves_command_output(start_binary):
+    pwndbg.commands.saveoutput.saved_outputs.clear()
+    pwndbg.commands.saveoutput.last_command = None
 
-    def by_name(self, name: str):
-        return self._values[name]
+    start_binary(REFERENCE_BINARY)
+    gdb.execute("break main")
+    gdb.execute("run")
+
+    gdb.execute("saveoutput info registers", to_string=True)
+
+    current = gdb.execute("info registers", to_string=True)
+
+    assert "info registers" in saved_outputs
+    assert saved_outputs["info registers"] == current
 
 
-class DummyFrame:
-    def __init__(self, regs: DummyRegs):
-        self._regs = regs
+def test_saveoutput_uses_last_command_when_no_args(start_binary):
+    pwndbg.commands.saveoutput.saved_outputs.clear()
+    pwndbg.commands.saveoutput.last_command = None
 
-    def regs(self):
-        return self._regs
+    start_binary(REFERENCE_BINARY)
+    gdb.execute("break main")
+    gdb.execute("run")
+
+    cmd = "info registers"
+    pwndbg.commands.saveoutput.saveoutput(["info", "registers"])
+    saved_outputs.clear()
+    pwndbg.commands.saveoutput.saveoutput([])
+
+    assert cmd in saved_outputs
 
 
-def test_saveoutput_registers_saves(monkeypatch):
-    so.saved_outputs.clear()
-    so.last_command = None
+def test_saveoutput_when_no_args_and_no_last_command(capfd):
+    pwndbg.commands.saveoutput.last_command = None
+    pwndbg.commands.saveoutput.saved_outputs.clear()
 
-    monkeypatch.setattr(pwndbg.aglib.arch, "name", "test-arch", raising=False)
-    monkeypatch.setattr(pwndbg.lib.regs, "reg_sets", {"test-arch": DummyRegSet()}, raising=False)
+    pwndbg.commands.saveoutput.saveoutput([])
 
-    regs = DummyRegs({"rax": 0x1, "rbx": 0x2, "rdi": 0x3, "rip": 0x401000, "rsp": 0x7FFFFFFF0000})
-    monkeypatch.setattr(pwndbg.dbg, "selected_frame", lambda: DummyFrame(regs), raising=False)
-
-    so.saveoutput(["registers"])
-
-    assert "registers" in so.saved_outputs
-    assert "rip\t0x401000" in so.saved_outputs_
+    out, _ = capfd.readouterr()
+    assert "No previous command to save." in out
