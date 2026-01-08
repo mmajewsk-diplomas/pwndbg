@@ -38,7 +38,7 @@ def test_setrlimit_soft_only_calls_invoke_and_defaults_hard():
         called["args"] = (num, soft_val, hard_val)
         return 0
 
-    with patch.object(sr, "_invoke_setrlimit", side_effect=fake_invoke):
+    with patch.object(sr, "invoke_setrlimit", side_effect=fake_invoke):
         out = gdb.execute("setrlimit cpu 10", to_string=True)
 
     assert called["args"] == (sr.LIMITS["cpu"], 10, 10)
