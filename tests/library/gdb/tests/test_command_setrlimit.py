@@ -6,30 +6,34 @@ import gdb
 
 import pwndbg.commands.setrlimit as sr
 
+from . import get_binary
+
+REFERENCE_BINARY = get_binary("reference-binary.native.out")
+
 
 def test_setrlimit_unknown_resource() -> None:
-    gdb.execute("file /bin/true", to_string=True)
+    gdb.execute(f"file {REFERENCE_BINARY}", to_string=True)
     gdb.execute("start", to_string=True)
     out = gdb.execute("setrlimit unknown 1", to_string=True)
     assert "Unknown resource 'unknown'" in out
 
 
 def test_setrlimit_invalid_soft_value() -> None:
-    gdb.execute("file /bin/true", to_string=True)
+    gdb.execute(f"file {REFERENCE_BINARY}", to_string=True)
     gdb.execute("start", to_string=True)
     out = gdb.execute("setrlimit cpu not-a-number", to_string=True)
     assert "Invalid limit 'not-a-number'" in out
 
 
 def test_setrlimit_invalid_hard_value() -> None:
-    gdb.execute("file /bin/true", to_string=True)
+    gdb.execute(f"file {REFERENCE_BINARY}", to_string=True)
     gdb.execute("start", to_string=True)
     out = gdb.execute("setrlimit cpu 1 invalid_hard", to_string=True)
     assert "Invalid limit 'invalid_hard'" in out
 
 
 def test_setrlimit_soft_only_calls_invoke_and_defaults_hard() -> None:
-    gdb.execute("file /bin/true", to_string=True)
+    gdb.execute(f"file {REFERENCE_BINARY}", to_string=True)
     gdb.execute("start", to_string=True)
 
     called: dict[str, tuple[int, int, int]] = {}
