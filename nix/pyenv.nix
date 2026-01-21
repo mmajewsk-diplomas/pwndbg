@@ -77,7 +77,6 @@ let
     "coverage"
     "mypy-extensions"
     "pytest"
-    "pytest-cov"
     "mypy"
     "vermin"
     # decomp2dbg deps
