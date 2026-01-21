@@ -2,7 +2,7 @@
 # setrlimit
 
 ```text
-usage: setrlimit [-h] resource soft [hard]
+usage: setrlimit [-h] {as,core,cpu,data,fsize,nofile,stack} soft [hard]
 
 ```
 
@@ -11,7 +11,7 @@ Set a POSIX resource limit in the debugged process.
 
 |Positional Argument|Help|
 | :--- | :--- |
-|resource|Which resource to limit: core, cpu, fsize, data, stack, nofile, as|
+|resource|Which resource to limit|
 |soft|Soft limit value (integer) or 'infinite'|
 |hard|Hard limit value (integer) or 'infinite' (defaults to soft)|
 

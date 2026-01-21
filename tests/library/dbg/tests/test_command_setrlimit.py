@@ -13,7 +13,7 @@ async def test_setrlimit_unknown_resource(ctrl: Controller) -> None:
 
     result = await ctrl.execute_and_capture("setrlimit unknown 1")
 
-    assert "Unknown resource 'unknown'" in result
+    assert "argument resource: invalid choice" in result
 
 
 @pwndbg_test

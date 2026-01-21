@@ -15,7 +15,7 @@ def test_setrlimit_unknown_resource() -> None:
     gdb.execute(f"file {REFERENCE_BINARY}", to_string=True)
     gdb.execute("start", to_string=True)
     out = gdb.execute("setrlimit unknown 1", to_string=True)
-    assert "Unknown resource 'unknown'" in out
+    assert "argument resource: invalid choice" in out
 
 
 def test_setrlimit_invalid_soft_value() -> None:

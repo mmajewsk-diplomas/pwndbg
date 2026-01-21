@@ -6,6 +6,7 @@ import pwndbg
 import pwndbg.color.message as message
 import pwndbg.commands
 import pwndbg.dbg_mod
+import pwndbg.lib.config
 from pwndbg.commands import CommandCategory
 
 RLIM_INFINITY = -1
@@ -24,8 +25,9 @@ parser = argparse.ArgumentParser(
 )
 parser.add_argument(
     "resource",
-    type=str,
-    help="Which resource to limit: " + ", ".join(LIMITS.keys()),
+    type=str.lower,
+    choices=sorted(LIMITS.keys()),
+    help="Which resource to limit",
 )
 parser.add_argument(
     "soft",
@@ -54,9 +56,6 @@ def to_int_limit(val: str) -> int:
 
 def ensure_can_call_setrlimit() -> pwndbg.dbg_mod.Process:
     proc = pwndbg.dbg.selected_inferior()
-
-    if proc is None or not proc.alive():
-        raise pwndbg.dbg_mod.Error("No running inferior - start or attach to a process first.")
 
     if not proc.is_linux():
         raise pwndbg.dbg_mod.Error("setrlimit command currently supports only Linux inferiors.")
@@ -99,9 +98,6 @@ def setrlimit(resource: str, soft: str, hard: str | None = None) -> None:
     Usage: setrlimit <resource> <soft> [hard]
     """
     res = resource.lower()
-    if res not in LIMITS:
-        print(message.error(f"Unknown resource '{resource}'. Valid: {', '.join(LIMITS)}"))
-        return
 
     try:
         soft_val = to_int_limit(soft)
