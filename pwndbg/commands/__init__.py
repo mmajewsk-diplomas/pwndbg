@@ -512,6 +512,15 @@ class CommandObj:
                 print("Feel free to re-enable manually.")
             else:
                 print()
+        except pwndbg.aglib.kernel.TypeNotRecovered as e:
+            print(message.warn(f"recovering {e.name} failed with error:\n{e}"))
+            kconfig = pwndbg.aglib.kernel.kconfig()
+            if kconfig and "CONFIG_RANDSTRUCT" in kconfig:
+                print(
+                    message.warn(
+                        "please note that some structs may not be recoverable when CONFIG_RANDSTRUCT=y"
+                    )
+                )
 
         except Exception:
             pwndbg.exception.handle(self.function.__name__)
@@ -807,6 +816,19 @@ def OnlyWhenPagingEnabled(function: Callable[P, T]) -> Callable[P, T | None]:
         return None
 
     return _OnlyWhenPagingEnabled
+
+
+def WarnOnKernelConfigRandstruct(function: Callable[P, T]) -> Callable[P, T | None]:
+    @functools.wraps(function)
+    def _WarnOnKernelConfigRandstruct(*a: P.args, **kw: P.kwargs) -> T | None:
+        if (
+            not pwndbg.aglib.kernel.has_debug_info()
+            and "CONFIG_RANDSTRUCT" in pwndbg.aglib.kernel.kconfig()
+        ):
+            log.warning("command output may be inaccurate because CONFIG_RANDSTRUCT=y")
+        return function(*a, **kw)
+
+    return _WarnOnKernelConfigRandstruct
 
 
 def OnlyWhenRunning(function: Callable[P, T]) -> Callable[P, T | None]:
