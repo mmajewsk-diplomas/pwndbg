@@ -6,12 +6,12 @@ usage: diffoutput [-h] ...
 
 ```
 
-Compare the current output of a command to its saved version.
+Diff current output of a debugger command against a saved snapshot.
 ### Positional arguments
 
 |Positional Argument|Help|
 | :--- | :--- |
-|args|Command plus arguments to execute and diff|
+|args|Command to diff|
 
 ### Optional arguments
 

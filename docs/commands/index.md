@@ -157,7 +157,7 @@
 -  [comm](misc/comm.md) - Put comments in assembly code.
 -  [cyclic](misc/cyclic.md) - Cyclic pattern creator/finder.
 -  [cymbol](misc/cymbol.md) - Manage custom C structures in pwndbg. Supports project-specific auto-loading from .gdbinit.
--  [diffoutput](misc/diffoutput.md) - Compare the current output of a command to its saved version.
+-  [diffoutput](misc/diffoutput.md) - Diff current output of a debugger command against a saved snapshot.
 -  [down](misc/down.md) - Select and print stack frame called by this one.
 -  [dt](misc/dt.md) - Dump out information on a type (e.g. ucontext_t).
 -  [dumpargs](misc/dumpargs.md) - Prints determined arguments for call/syscall instruction.

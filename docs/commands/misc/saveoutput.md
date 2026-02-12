@@ -11,7 +11,7 @@ Save the output of a debugger command for later diffing.
 
 |Positional Argument|Help|
 | :--- | :--- |
-|args|Command plus arguments to execute and save output|
+|args|Command to run and save.|
 
 ### Optional arguments
 

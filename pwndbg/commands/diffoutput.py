@@ -7,18 +7,15 @@ import pwndbg.color.message as message
 import pwndbg.commands
 import pwndbg.dbg_mod
 from pwndbg.commands import CommandCategory
-from pwndbg.commands.saveoutput import last_command, saved_outputs, run_debugger_command
+from pwndbg.commands.saveoutput import last_command
+from pwndbg.commands.saveoutput import run_debugger_command
+from pwndbg.commands.saveoutput import saved_outputs
 
 diff_parser = argparse.ArgumentParser(
     description="Diff current output of a debugger command against a saved snapshot."
 )
 
-diff_parser.add_argument(
-    "args",
-    nargs=argparse.REMAINDER,
-    type=str,
-    help="Command to diff"
-)
+diff_parser.add_argument("args", nargs=argparse.REMAINDER, type=str, help="Command to diff")
 
 
 @pwndbg.commands.Command(diff_parser, category=CommandCategory.MISC)

@@ -48,7 +48,6 @@ def run_debugger_command(cmd: str) -> str:
 def saveoutput(args: list[str]) -> None:
     global saved_outputs, last_command
 
-    what = args[0] if args else None
     if args:
         cmd = " ".join(args).strip()
     else:

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import gdb
+
 import pwndbg.commands.saveoutput
 from pwndbg.commands.saveoutput import saved_outputs
 
 from . import get_binary
-
-import gdb
 
 REFERENCE_BINARY = get_binary("reference-binary.out")
 
@@ -49,7 +49,6 @@ def test_saveoutput_uses_last_command_when_no_args(start_binary):
 
     cmd = "info registers"
     pwndbg.commands.saveoutput.saveoutput(["info", "registers"])
-    saved_outputs.clear()
     pwndbg.commands.saveoutput.saveoutput([])
 
     assert cmd in saved_outputs

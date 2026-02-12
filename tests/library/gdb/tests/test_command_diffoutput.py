@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import gdb
+
 import pwndbg.commands.diffoutput
 import pwndbg.commands.saveoutput
 
 from . import get_binary
-
-import gdb
 
 REFERENCE_BINARY = get_binary("reference-binary.out")
 
@@ -28,6 +28,7 @@ def test_diffoutput_no_last_command(capfd):
 
     out, _ = capfd.readouterr()
     assert "No previous command to diff." in out
+
 
 def test_diffoutput_no_difference(start_binary, capfd):
     start_binary(REFERENCE_BINARY)
