@@ -17,6 +17,7 @@ from collections.abc import Generator
 from collections.abc import Iterator
 from collections.abc import Sequence
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 from typing import Literal
 from typing import TypeVar
@@ -28,9 +29,12 @@ from typing_extensions import override
 import pwndbg
 import pwndbg.color.message as message
 import pwndbg.dbg_mod
+import pwndbg.lib.cache
 import pwndbg.lib.memory
+import pwndbg.lib.path
 from pwndbg.dbg_mod import EventHandlerPriority
 from pwndbg.dbg_mod import selection
+from pwndbg.lib import TypeNotFoundError
 from pwndbg.lib.arch import ArchDefinition
 from pwndbg.lib.arch import Platform
 from pwndbg.lib.regs import reg_sets
@@ -314,6 +318,7 @@ class LLDBFrame(pwndbg.dbg_mod.Frame):
         return None
 
     @override
+    @pwndbg.lib.cache.cache_until("forever")
     def stack_variables(self) -> tuple[tuple[int, int, str], ...]:
         return _get_frame_stack_variables(self.inner)
 
@@ -385,6 +390,13 @@ class LLDBThread(pwndbg.dbg_mod.Thread):
     @override
     def siginfo(self) -> SigInfo | None:
         lldb_siginfo = self.inner.GetSiginfo()
+
+        if lldb_siginfo.error.Fail():
+            # It can happen that LLDB fails to retrieve the signal information
+            # e.g. on QEMU kernel debugging:
+            # lldb_siginfo.error.GetCString() == "qXfer:siginfo:read not supported"
+            # Also reproducable on MacOS on normal binaries.
+            return None
 
         int_cast: Callable[[str], int] = lambda x: int(x, 16) if x.startswith("0x") else int(x)
 
@@ -560,8 +572,7 @@ class LLDBType(pwndbg.dbg_mod.Type):
         # if we're in an older version, we just assume it's naturally aligned.
         if LLDB_VERSION[0] >= 20 or (LLDB_VERSION[0] == 19 and LLDB_VERSION[1] >= 1):
             return self.inner.GetByteAlign()
-        else:
-            return self.sizeof
+        return self.sizeof
 
     @property
     @override
@@ -975,6 +986,10 @@ class LLDBProcess(pwndbg.dbg_mod.Process):
         )
 
     @override
+    def is_core_file(self) -> bool:
+        return bool(self.process.GetCoreFile().IsValid())
+
+    @override
     def stopped_with_signal(self) -> bool:
         return self.process.GetState() == lldb.eStateStopped and any(
             thread.GetStopReason() == lldb.eStopReasonSignal for thread in self.process.threads
@@ -1184,7 +1199,7 @@ class LLDBProcess(pwndbg.dbg_mod.Process):
         buffer = self.process.ReadMemory(address, size, e)
         if buffer:
             return bytearray(buffer)
-        elif not partial:
+        if not partial:
             raise pwndbg.dbg_mod.Error(f"could not read {size:#x} bytes: {e}")
 
         # At this point, we're in a bit of a pickle. LLDB doesn't give us enough
@@ -1237,8 +1252,7 @@ class LLDBProcess(pwndbg.dbg_mod.Process):
         size = self.find_largest_range_len(0, size, test)
         if size > 0:
             return bytearray(self.process.ReadMemory(address, size, e))
-        else:
-            return bytearray()
+        return bytearray()
 
     @override
     def write_memory(self, address: int, data: bytearray, partial: bool = False) -> int:
@@ -1472,8 +1486,7 @@ class LLDBProcess(pwndbg.dbg_mod.Process):
 
         if type:
             return value.cast(type)
-        else:
-            return value
+        return value
 
     @override
     def symbol_name_at_address(self, address: int) -> str | None:
@@ -1516,7 +1529,7 @@ class LLDBProcess(pwndbg.dbg_mod.Process):
         """
         # Please read book: https://akkadia.org/drepper/tls.pdf
         #
-        # LLDB doesn't handle symbols marked with STT_TLS at all[1], which
+        # LLDB doesn't handle symbols marked with STT_TLS at all[1][2], which
         # means that not only will they not have a type, they will also
         # give completely wrong results for GetStartAddress(), meaning we
         # can't use any of the mechanisms in LLDB to figure out where a TLS
@@ -1537,14 +1550,15 @@ class LLDBProcess(pwndbg.dbg_mod.Process):
         # for it in LLDB :(
         #
         # [1]: https://github.com/llvm/llvm-project/blob/86cf67ffc1ee62c65bef313bf58ae70f74afb7c1/lldb/source/Plugins/ObjectFile/ELF/ObjectFileELF.cpp#L2140
+        # [2]: https://github.com/llvm/llvm-project/issues/178953
+        import pwndbg.aglib.tls
+        import pwndbg.libc
 
-        if not self.is_linux():
+        if not (self.is_linux() and pwndbg.libc.which() == pwndbg.libc.LibcType.GLIBC):
             print(
                 f"warning: symbol '{sym.GetName()}' might be a TLS symbol, but Pwndbg only knows how to resolve those in x86-64 GNU/Linux"
             )
             return None
-
-        import pwndbg.aglib.tls
 
         tls_base = (
             pwndbg.aglib.tls.find_address_with_register()
@@ -1568,7 +1582,11 @@ class LLDBProcess(pwndbg.dbg_mod.Process):
         offset = sym.GetValue()
         import pwndbg.aglib.memory
 
-        tls_base_typed = pwndbg.aglib.memory.get_typed_pointer("typedef tcbhead_t", tls_base)
+        try:
+            tls_base_typed = pwndbg.aglib.memory.get_typed_pointer("typedef tcbhead_t", tls_base)
+        except TypeNotFoundError:
+            # We get a TypeNotFoundError here if glibc does not have debug info.
+            return None
 
         for module_id in range(self.target.GetNumModules() + 1):
             # This is the same as `tls_base->dtv[module_id].pointer.val + offset`.
@@ -1595,7 +1613,8 @@ class LLDBProcess(pwndbg.dbg_mod.Process):
         objfile: lldb.SBModule | None = None
         if objfile_endswith is not None:
             for m in self.target.module_iter():
-                if str(m.file.fullpath).endswith(objfile_endswith):
+                # FIXME: Path().resolve() is a workaround for #3641
+                if str(Path(m.file.fullpath).resolve()).endswith(objfile_endswith):
                     objfile = m
                     break
             if objfile is None:
@@ -1616,6 +1635,21 @@ class LLDBProcess(pwndbg.dbg_mod.Process):
 
         sym, cast_type, resolved_addr = symbol_for_preference
         return self.create_value(resolved_addr, cast_type)
+
+    @override
+    def get_function_boundaries(self, address: int) -> tuple[int, int] | None:
+        addr = self.target.ResolveLoadAddress(address)
+
+        if not addr.IsValid():
+            return None
+
+        func = addr.GetFunction()
+        if func.IsValid():
+            start: int = func.GetStartAddress().GetLoadAddress(self.target)
+            end: int = func.GetEndAddress().GetLoadAddress(self.target)
+            return start, end
+
+        return None
 
     def _iter_symbols(
         self, name: str, type: pwndbg.dbg_mod.SymbolLookupType, objfile: lldb.SBModule | None = None
@@ -1938,23 +1972,6 @@ class LLDBProcess(pwndbg.dbg_mod.Process):
         # - 'ABIMacOSX_arm64'
         return self.target.GetABIName().lower().startswith("sysv")
 
-    def _resolve_fullpath(self, spec: lldb.SBFileSpec) -> str:
-        """
-        LLDB doesn't resolve symbolic links for us. Pwndbg expects this, so we
-        have to resolve these paths before we pass them forward.
-        """
-
-        # We should resolve symbolic links.
-        link = pwndbg.aglib.file.readlink(spec.fullpath)
-        if len(link) == 0:
-            return spec.fullpath
-
-        # Get the absolute path if it is not already absolute.
-        if not os.path.isabs(link):
-            link = os.path.normpath(f"{spec.dirname}/{link}")
-
-        return link
-
     @override
     def module_section_locations(self) -> list[tuple[int, int, str, str]]:
         result = []
@@ -1976,7 +1993,7 @@ class LLDBProcess(pwndbg.dbg_mod.Process):
                     # This section is not loaded.
                     continue
 
-                fullpath = self._resolve_fullpath(module.GetFileSpec())
+                fullpath = pwndbg.lib.path.clean_path(str(module.GetFileSpec()))
 
                 result.append((load, section.GetByteSize(), section.GetName(), fullpath))
 
@@ -1993,7 +2010,7 @@ class LLDBProcess(pwndbg.dbg_mod.Process):
         if spec is None:
             return None
 
-        return self._resolve_fullpath(spec)
+        return pwndbg.lib.path.clean_path(str(spec))
 
     @override
     def main_module_entry(self) -> int | None:
@@ -2011,7 +2028,16 @@ class LLDBProcess(pwndbg.dbg_mod.Process):
         # in the docstring for this method. We assume that targets that have no
         # known modules - as is the case by default for QEMU - are statically
         # linked, same as GDB 13.2.
-        return self.target.GetNumModules() > 1
+        nfile_backed = 0
+        for i in range(self.target.GetNumModules()):
+            module = self.target.GetModuleAtIndex(i)
+            # We must check this so we don't count modules like [vdso] (#3643)
+            if module.IsFileBacked():
+                nfile_backed += 1
+                if nfile_backed > 1:
+                    return True
+
+        return False
 
     @override
     def dispatch_execution_controller(
