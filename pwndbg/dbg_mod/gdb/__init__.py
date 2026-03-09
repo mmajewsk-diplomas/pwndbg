@@ -21,10 +21,13 @@ import gdb.types
 from typing_extensions import override
 
 import pwndbg
+import pwndbg.color.message as message
 import pwndbg.dbg_mod
 import pwndbg.gdblib
 import pwndbg.gdblib.events
+import pwndbg.lib.cache
 import pwndbg.lib.memory
+import pwndbg.lib.path
 from pwndbg.dbg_mod import EventHandlerPriority
 from pwndbg.dbg_mod import EventType
 from pwndbg.dbg_mod import selection
@@ -78,6 +81,9 @@ gdb_mips_to_arch_attribute_map = {
     "isa32r6": ArchAttribute.MIPS_ISA_32R6,
     "isa64": ArchAttribute.MIPS_ISA_64,
     "isa64r2": ArchAttribute.MIPS_ISA_64R2,
+    "gs264e": ArchAttribute.MIPS_ISA_64R2,
+    "gs464": ArchAttribute.MIPS_ISA_64R2,
+    "gs464e": ArchAttribute.MIPS_ISA_64R2,
     "isa64r3": ArchAttribute.MIPS_ISA_64R3,
     "isa64r5": ArchAttribute.MIPS_ISA_64R5,
     "isa64r6": ArchAttribute.MIPS_ISA_64R6,
@@ -117,10 +123,17 @@ def _get_frame_stack_variables(frame: gdb.Frame) -> tuple[tuple[int, int, str], 
 
             try:
                 value = sym.value(frame)
+                # value.address can be None
+                # https://sourceware.org/gdb/current/onlinedocs/gdb.html/Values-From-Inferior.html#Values-From-Inferior:~:text=Variable%3A%20Value%2Eaddress
+                # https://sourceware.org/bugzilla/show_bug.cgi?id=33860
+                if value.address is None:
+                    continue
+
                 addr = int(value.address)
                 size = value.type.sizeof
                 variables.append((addr, addr + size, sym.name))
-            except (gdb.error, AttributeError, TypeError):
+            except (gdb.error, AttributeError):
+                # FIXME: We should get rid of this try-except in favour of checking the necessary conditions beforehand.
                 continue
 
         block = block.superblock
@@ -214,12 +227,13 @@ class GDBFrame(pwndbg.dbg_mod.Frame):
         # to read from the inferior. `sp` is resolved by GDB to the architecture-specific stack pointer.
         return int(self.regs().by_name("sp"))
 
+    @override
     def start(self) -> int | None:
         # How is it possible that this isn't in the API?
         # https://sourceware.org/gdb/current/onlinedocs/gdb.html/Frames-In-Python.html#Frames-In-Python
         import pwndbg.aglib
 
-        # We're gonna parse this:.
+        # We're gonna parse this:
         # e.g. `str(self.inner) == "{stack=0x7fffffffe030,code=0x00007ffff7fe0880,!special}"`
         # See gdb/python/py-frame.c:frapy_str() and gdb/frame.c:frame_id::to_string()
         # They really could just expose .stack() as an API...
@@ -231,9 +245,8 @@ class GDBFrame(pwndbg.dbg_mod.Frame):
             return (
                 int(str_id.partition("stack=")[2].partition(",")[0], 16) - pwndbg.aglib.arch.ptrsize
             )
-        else:
-            # We got "!stack", "stack=<unavailable>", "stack=<sentinel>" or "stack=<outer>".
-            return None
+        # We got "!stack", "stack=<unavailable>", "stack=<sentinel>" or "stack=<outer>".
+        return None
 
     @override
     def parent(self) -> pwndbg.dbg_mod.Frame | None:
@@ -268,7 +281,19 @@ class GDBFrame(pwndbg.dbg_mod.Frame):
         return sal.symtab.fullname(), sal.line
 
     @override
+    @pwndbg.lib.cache.cache_until("forever")
     def stack_variables(self) -> tuple[tuple[int, int, str], ...]:
+        import pwndbg.aglib.qemu
+
+        if pwndbg.aglib.qemu.is_qemu_kernel():
+            # Workaround for GDB bug:
+            # https://sourceware.org/bugzilla/show_bug.cgi?id=33861
+            # https://github.com/pwndbg/pwndbg/issues/3693
+            # Unfortunately there is no consistent way to detect this, I've had it
+            # happen even on block0 with hex(block.end - block.start) == 0x14a,
+            # so we simply don't support getting stack variables on GDB when kernel
+            # debugging.
+            return ()
         return _get_frame_stack_variables(self.inner)
 
     @override
@@ -523,8 +548,7 @@ class GDBStopPoint(pwndbg.dbg_mod.StopPoint):
         """
         if self not in BPWP_DEFERRED_DISABLE and self not in BPWP_DEFERRED_DELETE:
             return self.inner_stop()
-        else:
-            return False
+        return False
 
     def _clear(self):
         """
@@ -598,6 +622,15 @@ class GDBProcess(pwndbg.dbg_mod.Process):
     @override
     def alive(self) -> bool:
         return gdb.selected_thread() is not None
+
+    @override
+    def is_core_file(self) -> bool:
+        inferior = gdb.selected_inferior()
+        return (
+            hasattr(inferior, "connection")
+            and inferior.connection is not None
+            and inferior.connection.type == "core"
+        )
 
     @override
     def stopped_with_signal(self) -> bool:
@@ -922,6 +955,19 @@ class GDBProcess(pwndbg.dbg_mod.Process):
         return None
 
     @override
+    def get_function_boundaries(self, address: int) -> tuple[int, int] | None:
+        block = gdb.block_for_pc(address)
+
+        if block is not None:
+            # Final the top-level function that this block resides it
+            while block.superblock is not None and block.superblock.function is not None:
+                block = block.superblock
+
+            return block.start, block.end
+
+        return None
+
+    @override
     def types_with_name(self, name: str) -> Sequence[pwndbg.dbg_mod.Type]:
         # In GDB, process-level lookups for types are always global.
         #
@@ -961,6 +1007,12 @@ class GDBProcess(pwndbg.dbg_mod.Process):
 
             if (attribute := gdb_mips_to_arch_attribute_map.get(isa)) is not None:
                 arch_attributes.append(attribute)
+            else:
+                message.warn(
+                    f"Warning: unable to detect the corrects MIPS variant from GDB architecture '{arch}'\n"
+                    "Instruction disassembly may be inaccurate\n"
+                    "Please create a GitHub issue including the output of `pi gdb.newest_frame().architecture().name()`"
+                )
 
         # Below, we fix the fetched architecture
         for match in gdb_architecture_name_fixup_list:
@@ -1109,11 +1161,19 @@ class GDBProcess(pwndbg.dbg_mod.Process):
 
     @override
     def module_section_locations(self) -> list[tuple[int, int, str, str]]:
+        global pwndbg
         import pwndbg.gdblib.info
 
         result = []
         for section in pwndbg.gdblib.info.sections():
-            result.append((section.start, section.size, section.section, section.objfile))
+            result.append(
+                (
+                    section.start,
+                    section.size,
+                    section.section,
+                    pwndbg.lib.path.clean_path(section.objfile),
+                )
+            )
 
         return result
 
@@ -1182,8 +1242,7 @@ class GDBProcess(pwndbg.dbg_mod.Process):
         resp: str = gdb.execute(f"remove-symbol-file {path}", to_string=True)
         if "No symbol file found" in resp:
             return False
-        else:
-            return True
+        return True
 
     @override
     def runcmd(self, cmd: str) -> str:
@@ -1270,14 +1329,22 @@ class GDBCommand(gdb.Command):
         # word=None. Why?
         # Since we only support one level of subcommand completion (i.e. we dont support subsubcommand completion),
         # we don't really care about the text and word distinction.
-        if word is None or text != word:
+        # Correction (#3751): We have to handle the `text != word` case to properly autocomplete stuff like
+        # `knft list-<tab>` (text="list-", word="").
+
+        if word is None:
             return []
         if text == "":
             # Return all subcommands
             return self.subcommand_names
 
         # Find all with matching prefix
-        return [valid for valid in self.subcommand_names if valid.startswith(text)]
+
+        # We need to calculate `comp_start` to handle stuff like `knft list-flowtables`
+        # and only return the matched word. I.e. `knft list-f<tab>` should return "flowtables"
+        # not "list-flowtables".
+        comp_start: int = len(text) - len(word)
+        return [valid[comp_start:] for valid in self.subcommand_names if valid.startswith(text)]
 
 
 class GDBCommandHandle(pwndbg.dbg_mod.CommandHandle):
@@ -1608,11 +1675,20 @@ class GDB(pwndbg.dbg_mod.Debugger):
             is_home_loaded = True
 
         disable_local = not gdb.parameter("auto-load local-gdbinit")
-        should_load_local = (
-            not disable_local
-            and local_file.exists()
-            and not (is_home_loaded and home_file.samefile(local_file))
-        )
+        try:
+            should_load_local = (
+                not disable_local
+                and local_file.exists()
+                and not (is_home_loaded and home_file.samefile(local_file))
+            )
+        except PermissionError:
+            print(
+                message.warn(
+                    f"WARNING: Skipped loading {local_file} because you don't have the correct permissions."
+                )
+            )
+            should_load_local = False
+
         if should_load_local:
             load_source("./.gdbinit")
 
@@ -1652,6 +1728,7 @@ class GDB(pwndbg.dbg_mod.Debugger):
         set backtrace past-main on
         set step-mode on
         set print pretty on
+        set debuginfod enabled on
         handle SIGALRM nostop print nopass
         handle SIGBUS  stop   print nopass
         handle SIGPIPE nostop print nopass
@@ -1954,8 +2031,7 @@ class GDB(pwndbg.dbg_mod.Debugger):
         message = message.strip(".")
         if message == "unlimited":
             return 0
-        else:
-            return int(message)
+        return int(message)
 
     @override
     def addrsz(self, address: Any) -> str:

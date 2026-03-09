@@ -6,6 +6,7 @@ from typing import Any
 
 import pwndbg
 import pwndbg.color
+import pwndbg.color.context
 import pwndbg.color.memory
 import pwndbg.lib.config
 from pwndbg.color import theme
@@ -39,12 +40,11 @@ def int_to_string(num: int) -> str:
     """
     if max_decimal_number == -1:
         return f"{num}"
-    elif max_decimal_number == 0:
+    if max_decimal_number == 0:
         return f"{num:#x}"
-    elif abs(num) > max_decimal_number:
+    if abs(num) > max_decimal_number:
         return f"{num:#x}"
-    else:
-        return f"{num}"
+    return f"{num}"
 
 
 def int_pair_to_string(num1: int, num2: int) -> tuple[str, str]:
@@ -58,12 +58,11 @@ def int_pair_to_string(num1: int, num2: int) -> tuple[str, str]:
     """
     if max_decimal_number == -1:
         return f"{num1}", f"{num2}"
-    elif max_decimal_number == 0:
+    if max_decimal_number == 0:
         return f"{num1:#x}", f"{num2:#x}"
-    elif abs(num1) > max_decimal_number or abs(num2) > max_decimal_number:
+    if abs(num1) > max_decimal_number or abs(num2) > max_decimal_number:
         return f"{num1:#x}", f"{num2:#x}"
-    else:
-        return f"{num1}", f"{num2}"
+    return f"{num1}", f"{num2}"
 
 
 config_property_name_color = theme.add_color_param(
@@ -305,7 +304,7 @@ def format_source(source: list[str], nlines: int, interesting_line: int) -> list
     Arguments:
         source: Already highlighted source code. List of lines.
         nlines: The amount of lines we want back.
-        interesting_line: The line around which to center the output.
+        interesting_line: The line around which to center the output (0-indexed).
     """
     start, end = nlines_to_range(nlines, interesting_line, len(source))
     num_width = len(str(end))
@@ -319,6 +318,8 @@ def format_source(source: list[str], nlines: int, interesting_line: int) -> list
 
     # Format the output
     formatted_source = []
+    # line_number is 1-indexed (as source code usually is)
+    interesting_line1dx: int = interesting_line + 1
     for line_number, code in enumerate(source, start=start + 1):
         # Honor the tab-size setting.
         if pwndbg.config.context_code_tabstop > 0:
@@ -329,11 +330,11 @@ def format_source(source: list[str], nlines: int, interesting_line: int) -> list
 
         fmt = " {prefix_sign:{prefix_width}} {line_number:>{num_width}} {code}"
 
-        if pwndbg.config.highlight_source and line_number == interesting_line:
+        if pwndbg.config.highlight_source and line_number == interesting_line1dx:
             fmt = pwndbg.color.context.highlight(fmt)
 
         line = fmt.format(
-            prefix_sign=prefix_sign if line_number == interesting_line else "",
+            prefix_sign=prefix_sign if line_number == interesting_line1dx else "",
             prefix_width=prefix_width,
             line_number=line_number,
             num_width=num_width,
