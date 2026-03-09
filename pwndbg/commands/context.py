@@ -5,6 +5,7 @@ import ast
 import functools
 import logging
 import math
+import re
 import sys
 from collections import defaultdict
 from collections.abc import Callable
@@ -33,7 +34,8 @@ import pwndbg.color.memory as mem_color
 import pwndbg.color.syntax_highlight as H
 import pwndbg.commands
 import pwndbg.commands.telescope
-import pwndbg.integration
+import pwndbg.dbg_mod
+import pwndbg.dintegration
 import pwndbg.lib.cache
 import pwndbg.lib.config
 import pwndbg.lib.pretty_print as pretty_print
@@ -175,6 +177,11 @@ config_max_threads_display = pwndbg.config.add_param(
     4,
     "maximum number of threads displayed by the context command",
 )
+config_backtrace_format = pwndbg.config.add_param(
+    "context-backtrace-hex",
+    False,
+    "whether to use hex for offsets in the backtrace",
+)
 
 # Storing output configuration per section
 OutputType = str | Callable[[str], None]
@@ -298,10 +305,9 @@ def output(section: str) -> OutputWrapper:
     target = outputs.get(section, str(config_output))
     if not target or target == "stdout":
         return StdOutput()
-    elif callable(target):
+    if callable(target):
         return CallOutput(target)
-    else:
-        return FileOutput(target, "w")
+    return FileOutput(target, "w")
 
 
 parser = argparse.ArgumentParser(description="Sets the output of a context section.")
@@ -1351,7 +1357,9 @@ def context_disasm(
     syntax = pwndbg.aglib.disasm.disassembly.CapstoneSyntax[flavor]
 
     # Get the Capstone object to set disassembly syntax
-    cs = next(iter(pwndbg.aglib.disasm.disassembly.get_disassembler.cache.values()), None)
+    cs = next(
+        iter(getattr(pwndbg.aglib.disasm.disassembly.get_disassembler, "cache").values()), None
+    )
 
     # The `None` case happens when the cache was not filled yet (see e.g. #881)
     if cs is not None and cs.syntax != syntax:
@@ -1398,9 +1406,7 @@ theme.add_param("code-prefix", "►", "prefix marker for 'context code' command"
 # All of these are also used for the decompilation context^^
 
 
-@pwndbg.lib.cache.cache_until("objfile")
-def get_highlight_source(filename: str) -> tuple[str, ...]:
-    # Notice that the code is cached
+def get_highlight_source_uncached(filename: str) -> tuple[str, ...]:
     with open(filename, encoding="utf-8", errors="ignore") as f:
         source = f.read()
 
@@ -1410,6 +1416,12 @@ def get_highlight_source(filename: str) -> tuple[str, ...]:
     source_lines = source.split("\n")
     source_lines = tuple(line.rstrip() for line in source_lines)
     return source_lines
+
+
+@pwndbg.lib.cache.cache_until("objfile")
+def get_highlight_source(filename: str) -> tuple[str, ...]:
+    # Notice that the code is cached
+    return get_highlight_source_uncached(filename)
 
 
 def get_filename_and_formatted_source(height: int | None = None) -> tuple[str, list[str], int]:
@@ -1439,7 +1451,7 @@ def get_filename_and_formatted_source(height: int | None = None) -> tuple[str, l
         return "", [], closest_line
 
     nlines = max(int(source_disasm_lines), height or 0)
-    formatted_source = pretty_print.format_source(list(source), nlines, closest_line)
+    formatted_source = pretty_print.format_source(list(source), nlines, closest_line - 1)
 
     return filename, formatted_source, closest_line
 
@@ -1470,7 +1482,7 @@ def context_code(
     if should_decompile and pwndbg.aglib.regs.pc is not None:
         nlines = max(int(source_disasm_lines), height or 0)
         # Will be None if we aren't connected or decompilation fails.
-        code: list[str] | None = pwndbg.integration.manager.decompile_pretty(
+        code: list[str] | None = pwndbg.dintegration.manager.decompile_pretty(
             pwndbg.aglib.regs.pc, nlines
         )
         if code is None:
@@ -1548,14 +1560,31 @@ def context_backtrace(
     frame = newest_frame
     i = 0
     bt_prefix = f"{pwndbg.config.backtrace_prefix}"
+    # Use visual width of the prefix (strip color codes) so Unicode chars like ► are measured correctly
+    bt_prefix_visual_len = len(pwndbg.color.strip(bt_prefix))
+
+    # Pre-compute total number of frames to pad the frame label width consistently
+    total_frames = i
+    tmp = newest_frame
+    while tmp != oldest_frame:
+        total_frames += 1
+        tmp = tmp.parent()
+    frame_label_width = len(f"{backtrace_frame_label}{total_frames}")
+
     while True:
-        prefix = bt_prefix if frame == this_frame else " " * len(bt_prefix)
+        prefix = bt_prefix if frame == this_frame else " " * bt_prefix_visual_len
         prefix = f" {c.prefix(prefix)}"
         addrsz = c.address(pwndbg.ui.addrsz(frame.pc()))
         symbol = c.symbol(pwndbg.aglib.symbol.resolve_addr(int(frame.pc())))
         if symbol:
+            if bool(config_backtrace_format):
+                offset_regex = re.compile(r"^(.+)\+(\d+)$")
+                parts = offset_regex.match(symbol)
+                if parts:
+                    symbol = f"{parts[1]}+{int(parts[2]):#x}"
             addrsz = f"{addrsz} {symbol}"
-        result.append(f"{prefix} {c.frame_label(f'{backtrace_frame_label}{i}')} {addrsz}")
+        frame_label = f"{backtrace_frame_label}{i}".rjust(frame_label_width)
+        result.append(f"{prefix} {c.frame_label(frame_label)} {addrsz}")
 
         if frame == oldest_frame:
             break
@@ -1596,12 +1625,11 @@ thread_status_messages = {
 def get_thread_status(thread: gdb.InferiorThread) -> str:
     if thread.is_running():
         return thread_status_messages["running"]
-    elif thread.is_stopped():
+    if thread.is_stopped():
         return thread_status_messages["stopped"]
-    elif thread.is_exited():
+    if thread.is_exited():
         return thread_status_messages["exited"]
-    else:
-        return "unknown"
+    return "unknown"
 
 
 @serve_context_history
@@ -1698,9 +1726,8 @@ def context_threads(
     return out
 
 
-@pwndbg.dbg.event_handler(EventType.STOP, EventHandlerPriority.UPDATE_ARCH_AND_TYPEINFO)
-@pwndbg.dbg.event_handler(EventType.EXIT, EventHandlerPriority.UPDATE_ARCH_AND_TYPEINFO)
-@pwndbg.dbg.event_handler(EventType.CONTINUE, EventHandlerPriority.UPDATE_ARCH_AND_TYPEINFO)
+@pwndbg.dbg.event_handler(EventType.STOP, EventHandlerPriority.SAVE_SIGNAL)
+@pwndbg.dbg.event_handler(EventType.EXIT, EventHandlerPriority.SAVE_SIGNAL)
 def save_signal() -> None:
     global last_signal
     last_signal = result = []
