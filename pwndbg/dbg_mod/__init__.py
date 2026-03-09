@@ -17,6 +17,7 @@ from typing import Literal
 from typing import TypedDict
 from typing import TypeVar
 
+import pwndbg.lib.cache
 import pwndbg.lib.memory
 from pwndbg.lib.arch import ArchDefinition
 from pwndbg.lib.siginfo import SigInfo
@@ -276,12 +277,15 @@ class Frame:
         """
         raise NotImplementedError()
 
+    @pwndbg.lib.cache.cache_until("forever")
     def stack_variables(self) -> tuple[tuple[int, int, str], ...]:
         """
         Get all stack variables (local variables and arguments) in current frame.
 
         Returns a tuple of (start_address, end_address, name) for each variable.
         Returns an empty tuple if no debug information is available or on error.
+
+        Cached forever since a Frame is to be used ephemerally.
         """
         raise NotImplementedError()
 
@@ -434,6 +438,12 @@ class Process:
         """
         raise NotImplementedError()
 
+    def is_core_file(self) -> bool:
+        """
+        Returns whether this process is a coredump file.
+        """
+        raise NotImplementedError()
+
     def stopped_with_signal(self) -> bool:
         """
         Returns whether this process was stopped by a signal.
@@ -573,6 +583,15 @@ class Process:
         Raises:
         - pwndbg.dbg_mod.Error: If no object file matching the `objfile_endswith` pattern is found.
         """
+
+    def get_function_boundaries(self, address: int) -> tuple[int, int] | None:
+        """
+        Return the function start and end address for a function that
+        contains address `addr`.
+
+        Returns:
+        - tuple[int, int] | None: [start, end) of function block if found (end address is exclusive)
+        """
         raise NotImplementedError()
 
     # There is an interesting counterpart to this method that exists at the
@@ -653,6 +672,10 @@ class Process:
         """
         Return a list of (address, size, section_name, module_name) tuples for
         the loaded sections in every module of this process.
+
+        The module name will have its full path resolved without following symlinks,
+        so it is not guaranteed to be the same string as in `/proc/<pid>/maps`
+        or vmmap.
         """
         raise NotImplementedError()
 
@@ -930,7 +953,7 @@ class Type:
 
         if struct_type.code not in NESTED_TYPES:
             return None
-        elif struct_type in nested_cyclic_types:
+        if struct_type in nested_cyclic_types:
             return None
 
         # note: lldb.SBType and gdb.Type dont support Sets
@@ -1139,7 +1162,10 @@ class EventType(Enum):
 
     CONTINUE = 5
     """This event is fired after the user has requested for process execution to continue
-    after it had been previously suspended."""
+    after it had been previously suspended.
+
+    Be careful about using this event since the debugger may not allow many operations as
+    it may consider the program as 'running' when this event is dispatched (e.g. #3683)."""
 
     NEW_MODULE = 6
     """This event is fired when a new application module has been encountered by the
@@ -1165,6 +1191,8 @@ class EventHandlerPriority(Enum):
     UPDATE_ARCH_AND_TYPEINFO = 10
     """We need to initialize the architecture and type information before doing anything
     else substantial."""
+    SAVE_SIGNAL = 20
+    """Save siginfo information for displaying in the context."""
     STANDARD = 100
     """The default value."""
 
