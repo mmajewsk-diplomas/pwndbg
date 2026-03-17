@@ -123,6 +123,28 @@ returned.
 
 ----------
 
+### **bss**
+
+
+``` {.python .no-copy}
+bss(offset: gdb.Value = gdb.Value(0)) -> int
+```
+
+
+Return the address of the program's BSS start. Optional offset allowed.
+
+#### Example
+```
+pwndbg> elf
+0x555555558010     0x555555558020      RW-       0x10  .bss
+pwndbg> p/x $bss()
+$1 = 0x555555558010
+pwndbg> p/x $bss(0x4)
+$2 = 0x555555558014
+```
+
+----------
+
 ### **environ**
 
 
@@ -209,6 +231,26 @@ offset, it is usually easier to use GDB's builtin $fs_base variable.
 
 ----------
 
+### **got**
+
+
+``` {.python .no-copy}
+got(offset: gdb.Value = gdb.Value(0)) -> int
+```
+
+
+Return the address of the Global Offset Table (GOT), optional offset allowed.
+
+#### Example
+```
+pwndbg> p/x $got()
+$1 = 0x555555557fc0
+pwndbg> p/x $got(0x8)
+$2 = 0x555555557fc8
+```
+
+----------
+
 ### **gsbase**
 
 
@@ -240,6 +282,39 @@ $2 = 1
 ```
 If you're not providing an offset, it is usually easier to use GDB's
 builtin $gs_base variable.
+
+----------
+
+### **heap**
+
+
+``` {.python .no-copy}
+heap(offset: gdb.Value = gdb.Value(0)) -> int
+```
+
+
+Return the base address of the heap mapping, optional offset allowed.
+
+#### Example
+```
+pwndbg> vmmap
+0x555555554000     0x555555555000 r--p     1000       0 p1
+0x555555555000     0x555555556000 r-xp     1000    1000 p1
+0x555555556000     0x555555557000 r--p     1000    2000 p1
+0x555555557000     0x555555558000 r--p     1000    2000 p1
+0x555555558000     0x555555559000 rw-p     1000    3000 p1
+0x555555559000     0x55555557a000 rw-p    21000       0 [heap]
+[...]
+pwndbg> p/x $heap()
+$1 = 0x555555559000
+pwndbg> p/x $heap(0x10)
+$2 = 0x555555559010
+pwndbg> x/32bx $heap()
+0x555555559000:     0x00    0x00    0x00    0x00    0x00    0x00    0x00    0x00
+0x555555559008:     0x91    0x02    0x00    0x00    0x00    0x00    0x00    0x00
+0x555555559010:     0x00    0x00    0x00    0x00    0x00    0x00    0x00    0x00
+0x555555559018:     0x00    0x00    0x00    0x00    0x00    0x00    0x00    0x00
+```
 
 ----------
 
@@ -294,6 +369,37 @@ pwndbg> tele $rebase(0xd9020)
 02:0010│  0x55555562d030 ◂— 0x65720021656d616e /* 'name!' */
 03:0018│  0x55555562d038 ◂— 'adline stdin'
 [...]
+```
+
+----------
+
+### **stack**
+
+
+``` {.python .no-copy}
+stack(offset: gdb.Value = gdb.Value(0)) -> int
+```
+
+
+Return the base address of the stack mapping, optional offset allowed.
+
+#### Example
+```
+pwndbg> vmmap
+[...]
+0x7ffff7fc5000     0x7ffff7fc6000 r--p     1000       0 /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+0x7ffff7fc6000     0x7ffff7ff1000 r-xp    2b000    1000 /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+0x7ffff7ff1000     0x7ffff7ffb000 r--p     a000   2c000 /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+0x7ffff7ffb000     0x7ffff7ffd000 r--p     2000   36000 /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+0x7ffff7ffd000     0x7ffff7fff000 rw-p     2000   38000 /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+0x7ffffffde000     0x7ffffffff000 rw-p    21000       0 [stack]
+[...]
+pwndbg> p/x $stack()
+$1 = 0x7ffffffde000
+pwndbg> p/x $stack(0x10)
+$2 = 0x7ffffffde010
+pwndbg> x/gx $stack()
+0x7ffffffde000:     0x0000000000000000
 ```
 
 ----------

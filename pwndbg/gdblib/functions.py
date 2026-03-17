@@ -14,9 +14,12 @@ import gdb
 
 import pwndbg.aglib.argv
 import pwndbg.aglib.elf
+import pwndbg.aglib.file
 import pwndbg.aglib.proc
 import pwndbg.aglib.vmmap
 import pwndbg.dbg_mod
+import pwndbg.wrappers.checksec
+import pwndbg.wrappers.readelf
 from pwndbg.lib.common import hex2ptr_common
 
 functions: list[_GdbFunction] = []
@@ -161,8 +164,12 @@ def heap(offset: gdb.Value = gdb.Value(0)) -> int:
     0x555555559018:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
     ```
     """
-    heap_base = base("[heap]")
-    return int(heap_base) + int(offset)
+    heap_base = next((p.vaddr for p in pwndbg.aglib.vmmap.get() if p.objfile == "[heap]"), None)
+
+    if heap_base is None:
+        raise gdb.GdbError("$heap error: heap mapping not found.")
+
+    return heap_base + int(offset)
 
 
 @GdbFunction(only_when_running=True)
@@ -183,25 +190,18 @@ def stack(offset: gdb.Value = gdb.Value(0)) -> int:
     [...]
     pwndbg> p/x $stack()
     $1 = 0x7ffffffde000
+    pwndbg> p/x $stack(0x10)
+    $2 = 0x7ffffffde010
     pwndbg> x/gx $stack()
     0x7ffffffde000:	0x0000000000000000
     ```
     """
-    stack_base = base("[stack]")
-    return int(stack_base) + int(offset)
+    stack_base = next((p.vaddr for p in pwndbg.aglib.vmmap.get() if p.objfile == "[stack]"), None)
 
+    if stack_base is None:
+        raise gdb.GdbError("$stack error: stack mapping not found.")
 
-def _resolve_symbol_address(candidates: list[str]) -> int | None:
-    """
-    Try to resolve any of the given symbol names to an int address.
-    Returns the address, or None if none of them can be resolved.
-    """
-    for name in candidates:
-        addr = pwndbg.aglib.symbol.lookup_symbol_addr(name)
-        if addr is not None:
-            return addr
-
-    return None
+    return stack_base + int(offset)
 
 
 @GdbFunction(only_when_running=True)
@@ -211,25 +211,54 @@ def bss(offset: gdb.Value = gdb.Value(0)) -> int:
 
     Example:
     ```
+    pwndbg> elf
+    0x555555558010     0x555555558020      RW-       0x10  .bss
     pwndbg> p/x $bss()
     $1 = 0x555555558010
-    pwndbg> p/x $bss(0x10)
-    $2 = 0x555555558020
+    pwndbg> p/x $bss(0x4)
+    $2 = 0x555555558014
     ```
     """
-    bss_symbols = [
-        "__bss_start",
-        "_bss_start",
-        "__bss_start__",
-        "bss_start",
-        "_edata",
-    ]
 
-    base = _resolve_symbol_address(bss_symbols)
-    if base is None:
-        raise gdb.GdbError("$bss error: could not find a known bss symbol.")
+    path = pwndbg.aglib.proc.exe()
+    section = pwndbg.aglib.elf.section_by_name(path, ".bss", try_local_path=True)
+    if section is None:
+        raise gdb.GdbError("$bss error: could not find the .bss section.")
 
-    return base + int(offset)
+    bss_base, _, _ = section
+
+    local_path = pwndbg.aglib.file.get_file(path, try_local_path=True)
+    pie_status = pwndbg.wrappers.checksec.pie_status(local_path)
+    if "PIE enabled" in pie_status:
+        bss_base += pwndbg.aglib.proc.binary_base_addr()
+
+    return bss_base + int(offset)
+
+
+def _main_executable_got_base() -> int | None:
+    path = pwndbg.aglib.proc.exe()
+    local_path = pwndbg.aglib.file.get_file(path, try_local_path=True)
+    pie_status = pwndbg.wrappers.checksec.pie_status(local_path)
+    got_entries = pwndbg.wrappers.readelf.get_got_entry(local_path)
+
+    bin_base_offset = pwndbg.aglib.proc.binary_base_addr() if "PIE enabled" in pie_status else 0
+
+    addresses: list[int] = []
+
+    for _, lines in got_entries.items():
+        for line in lines:
+            parts = line.split()
+            if not parts:
+                continue
+
+            offset = parts[0]
+            address = int(offset, 16) + bin_base_offset
+            addresses.append(address)
+
+    if not addresses:
+        return None
+
+    return min(addresses)
 
 
 @GdbFunction(only_when_running=True)
@@ -240,24 +269,17 @@ def got(offset: gdb.Value = gdb.Value(0)) -> int:
     Example:
     ```
     pwndbg> p/x $got()
-    $1 = 0x7ffff7e02b80
+    $1 = 0x555555557fc0
     pwndbg> p/x $got(0x8)
-    $2 = 0x7ffff7e02b88
+    $2 = 0x555555557fc8
     ```
     """
-    got_symbols = [
-        "_GLOBAL_OFFSET_TABLE_",
-        "__global_offset_table",
-        "__global_offset_table__",
-        "GOT",
-        "__got_start",
-    ]
 
-    base = _resolve_symbol_address(got_symbols)
-    if base is None:
-        raise gdb.GdbError("$got error: could not find a known GOT symbol.")
+    got_base = _main_executable_got_base()
+    if got_base is None:
+        raise gdb.GdbError("$got error: could not determine the main executable GOT address.")
 
-    return base + int(offset)
+    return got_base + int(offset)
 
 
 @GdbFunction()
