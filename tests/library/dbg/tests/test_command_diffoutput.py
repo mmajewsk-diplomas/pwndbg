@@ -39,7 +39,7 @@ async def test_diffoutput_detects_difference_after_state_change(ctrl: Controller
     await ctrl.launch(REFERENCE_BINARY, args=[])
 
     out_save = await ctrl.execute_and_capture("saveoutput regs")
-    assert "Output saved for command: 'info registers'" in out_save
+    assert "Output saved for command: 'regs'" in out_save
 
     await ctrl.execute_and_capture("stepi")
 
