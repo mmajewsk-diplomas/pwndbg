@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import gdb
 
 import pwndbg.commands.saveoutput
@@ -10,7 +12,7 @@ from . import get_binary
 REFERENCE_BINARY = get_binary("reference-binary.native.out")
 
 
-def test_saveoutput_joins_args_correctly(start_binary):
+def test_saveoutput_joins_args_correctly(start_binary: Any):
     pwndbg.commands.saveoutput.saved_outputs.clear()
     pwndbg.commands.saveoutput.last_command = None
 
@@ -23,7 +25,7 @@ def test_saveoutput_joins_args_correctly(start_binary):
     assert "info registers" in saved_outputs
 
 
-def test_saveoutput_saves_command_output(start_binary):
+def test_saveoutput_saves_command_output(start_binary: Any):
     pwndbg.commands.saveoutput.saved_outputs.clear()
     pwndbg.commands.saveoutput.last_command = None
 
@@ -39,7 +41,7 @@ def test_saveoutput_saves_command_output(start_binary):
     assert saved_outputs["info registers"] == current
 
 
-def test_saveoutput_uses_last_saved_command_when_no_args(start_binary):
+def test_saveoutput_uses_last_saved_command_when_no_args(start_binary: Any):
     pwndbg.commands.saveoutput.saved_outputs.clear()
     pwndbg.commands.saveoutput.last_command = None
 
@@ -54,7 +56,7 @@ def test_saveoutput_uses_last_saved_command_when_no_args(start_binary):
     assert cmd in saved_outputs
 
 
-def test_saveoutput_when_no_args_and_no_previous_saved_command(capfd):
+def test_saveoutput_when_no_args_and_no_previous_saved_command(capfd: Any):
     pwndbg.commands.saveoutput.last_command = None
     pwndbg.commands.saveoutput.saved_outputs.clear()
 

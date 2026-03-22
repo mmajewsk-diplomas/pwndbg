@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import gdb
 
 import pwndbg.commands.diffoutput
@@ -10,7 +12,7 @@ from . import get_binary
 REFERENCE_BINARY = get_binary("reference-binary.native.out")
 
 
-def test_diffoutput_no_saved_output(capfd):
+def test_diffoutput_no_saved_output(capfd: Any):
     pwndbg.commands.diffoutput.saved_outputs.clear()
     pwndbg.commands.diffoutput.last_command = "info registers"
 
@@ -20,7 +22,7 @@ def test_diffoutput_no_saved_output(capfd):
     assert "No saved output for command: 'info registers'" in out
 
 
-def test_diffoutput_no_last_command(capfd):
+def test_diffoutput_no_last_command(capfd: Any):
     pwndbg.commands.diffoutput.saved_outputs.clear()
     pwndbg.commands.diffoutput.last_command = None
 
@@ -30,7 +32,7 @@ def test_diffoutput_no_last_command(capfd):
     assert "No previous command to diff." in out
 
 
-def test_diffoutput_no_difference(start_binary, capfd):
+def test_diffoutput_no_difference(start_binary: Any, capfd: Any):
     start_binary(REFERENCE_BINARY)
     gdb.execute("break main")
     gdb.execute("run")
@@ -49,7 +51,7 @@ def test_diffoutput_no_difference(start_binary, capfd):
     assert "No differences found." in out
 
 
-def test_diffoutput_detects_difference(start_binary, capfd):
+def test_diffoutput_detects_difference(start_binary: Any, capfd: Any):
     start_binary(REFERENCE_BINARY)
     gdb.execute("break main")
     gdb.execute("run")
