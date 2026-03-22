@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 
 import pwndbg
 import pwndbg.color.message as message
@@ -36,7 +38,18 @@ def run_debugger_command(cmd: str) -> str:
     if proc is None:
         raise pwndbg.dbg_mod.Error("No selected inferior process.")
 
-    return proc.runcmd(cmd)
+    stdout_buffer = io.StringIO()
+    stderr_buffer = io.StringIO()
+
+    with contextlib.redirect_stdout(stdout_buffer), contextlib.redirect_stderr(stderr_buffer):
+        result = proc.runcmd(cmd)
+
+    captured = stdout_buffer.getvalue() + stderr_buffer.getvalue()
+
+    if result:
+        return result
+
+    return captured
 
 
 @pwndbg.commands.Command(save_parser, category=CommandCategory.MISC)
