@@ -7,7 +7,7 @@ import pwndbg.commands.saveoutput
 
 from . import get_binary
 
-REFERENCE_BINARY = get_binary("reference-binary.out")
+REFERENCE_BINARY = get_binary("reference-binary.native.out")
 
 
 def test_diffoutput_no_saved_output(capfd):

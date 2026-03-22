@@ -7,7 +7,7 @@ from pwndbg.commands.saveoutput import saved_outputs
 
 from . import get_binary
 
-REFERENCE_BINARY = get_binary("reference-binary.out")
+REFERENCE_BINARY = get_binary("reference-binary.native.out")
 
 
 def test_saveoutput_joins_args_correctly(start_binary):
