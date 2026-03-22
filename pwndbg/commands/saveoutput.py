@@ -36,6 +36,22 @@ def get_last_history_command() -> str | None:
     return None
 
 
+def get_command_to_save(args: list[str]) -> str | None:
+    global last_command
+    if args:
+        cmd = " ".join(args).strip()
+        return cmd or None
+
+    cmd = get_last_history_command()
+    if cmd:
+        return cmd
+
+    if last_command:
+        return last_command
+
+    return None
+
+
 def run_debugger_command(cmd: str) -> str:
     proc = pwndbg.dbg.selected_inferior()
     if proc is None:
@@ -48,13 +64,10 @@ def run_debugger_command(cmd: str) -> str:
 def saveoutput(args: list[str]) -> None:
     global saved_outputs, last_command
 
-    if args:
-        cmd = " ".join(args).strip()
-    else:
-        cmd = get_last_history_command() or ""
-        if not cmd:
-            print(message.error("No previous command to save."))
-            return
+    cmd = get_command_to_save(args)
+    if not cmd:
+        print(message.error("No previous command to save."))
+        return
 
     try:
         output = run_debugger_command(cmd)
