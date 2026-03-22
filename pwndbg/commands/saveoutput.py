@@ -23,33 +23,12 @@ save_parser.add_argument(
 )
 
 
-def get_last_history_command() -> str | None:
-    history = pwndbg.dbg.history(50)
-    for _, cmd in reversed(history):
-        line = cmd.strip()
-        if not line:
-            continue
-        name = line.split()[0]
-        if name in {"saveoutput", "diffoutput"}:
-            continue
-        return line
-    return None
-
-
 def get_command_to_save(args: list[str]) -> str | None:
-    global last_command
     if args:
         cmd = " ".join(args).strip()
         return cmd or None
 
-    cmd = get_last_history_command()
-    if cmd:
-        return cmd
-
-    if last_command:
-        return last_command
-
-    return None
+    return last_command
 
 
 def run_debugger_command(cmd: str) -> str:

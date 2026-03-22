@@ -11,18 +11,19 @@ REFERENCE_BINARY = get_binary("reference-binary.native.out")
 async def test_saveoutput_saves_output_for_explicit_command(ctrl: Controller) -> None:
     await ctrl.launch(REFERENCE_BINARY, args=[])
 
-    out = await ctrl.execute_and_capture("saveoutput info registers")
-    assert "Output saved for command: 'info registers'" in out
+    out = await ctrl.execute_and_capture("saveoutput regs")
+    assert "Output saved for command: 'regs'" in out
 
 
 @pwndbg_test
 async def test_saveoutput_uses_history_when_no_args(ctrl: Controller) -> None:
     await ctrl.launch(REFERENCE_BINARY, args=[])
 
-    await ctrl.execute_and_capture("info registers")
+    first = await ctrl.execute_and_capture("saveoutput regs")
+    assert "Output saved for command: 'regs'" in first
 
     out = await ctrl.execute_and_capture("saveoutput")
-    assert "Output saved for command: 'info registers'" in out
+    assert "Output saved for command: 'regs'" in out
 
 
 @pwndbg_test
