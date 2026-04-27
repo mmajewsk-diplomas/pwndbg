@@ -52,3 +52,24 @@ async def test_config_filtering_missing(ctrl: Controller):
 
     out = await ctrl.execute_and_capture("config asdasdasdasd")
     assert out == 'No config parameter found with filter "asdasdasdasd"\n'
+
+
+@pwndbg_test
+async def test_auto_context(ctrl: Controller) -> None:
+    await ctrl.launch(REFERENCE_BINARY)
+    
+    out = await ctrl.execute_and_capture("config auto-context")
+    assert "True" in out
+    
+    await ctrl.execute("break main")
+    await ctrl.execute("run")
+    await ctrl.execute("set auto-context off")
+    out = await ctrl.execute_and_capture("next")
+    assert "disasm" not in out
+    
+    out = await ctrl.execute_and_capture("ctx")
+    assert "disasm" in out
+    
+    await ctrl.execute("set auto-context on")
+    out = await ctrl.execute_and_capture("next")
+    assert "disasm" in out
