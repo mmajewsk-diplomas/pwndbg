@@ -90,7 +90,8 @@ def setrlimit(resource: str, soft: str, hard: str | None = None) -> None:
 
         shellcode_bin = pwndbg.aglib.asm.asm(asm)
         async with pwndbg.aglib.shellcode.exec_shellcode(ec, shellcode_bin):
-            ret = pwndbg.aglib.shellcode._get_syscall_return_value()
+            register_set = pwndbg.lib.regs.reg_sets[pwndbg.aglib.arch.name]
+            ret: int = pwndbg.aglib.regs.read_reg(register_set.retval)
 
         print(message.success(f"Set {res} limit (return={ret}): soft={soft_str}, hard={hard_str}"))
 
