@@ -17,11 +17,21 @@ async def test_setrlimit_unknown_resource(ctrl: Controller) -> None:
 
 
 @pwndbg_test
-async def test_setrlimit_invalid_value(ctrl: Controller) -> None:
+async def test_setrlimit_invalid_soft_value(ctrl: Controller) -> None:
     await ctrl.launch(REFERENCE_BINARY, args=[])
+    out = await ctrl.execute_and_capture("setrlimit cpu not-a-number")
+    assert "Invalid limit 'not-a-number'" in out
 
-    out1 = await ctrl.execute_and_capture("setrlimit cpu not-a-number")
-    assert "Invalid limit 'not-a-number'" in out1
 
-    out2 = await ctrl.execute_and_capture("setrlimit cpu 1 invalid_hard")
-    assert "Invalid limit 'invalid_hard'" in out2
+@pwndbg_test
+async def test_setrlimit_invalid_hard_value(ctrl: Controller) -> None:
+    await ctrl.launch(REFERENCE_BINARY, args=[])
+    out = await ctrl.execute_and_capture("setrlimit cpu 1 invalid_hard")
+    assert "Invalid limit 'invalid_hard'" in out
+
+
+@pwndbg_test
+async def test_setrlimit_soft_only_defaults_hard(ctrl: Controller) -> None:
+    await ctrl.launch(REFERENCE_BINARY, args=[])
+    out = await ctrl.execute_and_capture("setrlimit cpu 10")
+    assert "soft=10, hard=10" in out

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import argparse
 
-import pwndbg
+import pwnlib.shellcraft
+
+import pwndbg.aglib.asm
+import pwndbg.aglib.shellcode
 import pwndbg.color.message as message
 import pwndbg.commands
 import pwndbg.dbg_mod
-import pwndbg.lib.config
 from pwndbg.commands import CommandCategory
 
 RLIM_INFINITY = -1
@@ -54,49 +56,14 @@ def to_int_limit(val: str) -> int:
         raise
 
 
-def ensure_can_call_setrlimit() -> pwndbg.dbg_mod.Process:
-    proc = pwndbg.dbg.selected_inferior()
-
-    if not proc.is_linux():
-        raise pwndbg.dbg_mod.Error("setrlimit command currently supports only Linux inferiors.")
-
-    sym = proc.lookup_symbol(
-        "setrlimit",
-        prefer_static=False,
-        type=pwndbg.dbg_mod.SymbolLookupType.FUNCTION,
-        objfile_endswith=None,
-    )
-    if sym is None:
-        raise pwndbg.dbg_mod.Error("Could not find a setrlimit() symbol in the inferior. ")
-
-    types = proc.types_with_name("struct rlimit")
-    if not types:
-        raise pwndbg.dbg_mod.Error("Type 'struct rlimit' is not available in debug information. ")
-
-    return proc
-
-
-def invoke_setrlimit(num: int, soft_val: int, hard_val: int) -> int:
-    proc = ensure_can_call_setrlimit()
-
-    expr = f"(int)setrlimit({num}, (struct rlimit[]){{ {{ {soft_val}, {hard_val} }} }})"
-
-    try:
-        value = proc.evaluate_expression(expr)
-    except pwndbg.dbg_mod.Error as e:
-        raise pwndbg.dbg_mod.Error(f"Error while evaluating setrlimit expression: {e}")
-
-    return int(value)
-
-
 @pwndbg.commands.Command(parser, category=CommandCategory.MISC)
 @pwndbg.commands.OnlyWhenRunning
 def setrlimit(resource: str, soft: str, hard: str | None = None) -> None:
     """
-    Sets a POSIX resource limit in the debugged process.
-
+    Sets a POSIX resource limit in the debugged process via the setrlimit syscall.
     Usage: setrlimit <resource> <soft> [hard]
     """
+
     res = resource.lower()
 
     try:
@@ -107,19 +74,24 @@ def setrlimit(resource: str, soft: str, hard: str | None = None) -> None:
 
     num = LIMITS[res]
 
-    try:
-        ret = invoke_setrlimit(num, soft_val, hard_val)
-    except pwndbg.dbg_mod.Error as e:
-        print(message.error(str(e)))
-        return
-    except Exception as e:
-        print(message.error(f"Failed to call setrlimit in inferior. Details: {e}"))
-        return
-
-    print(
-        message.success(
-            f"Set {res} limit (return={ret}): "
-            f"soft={'∞' if soft_val == RLIM_INFINITY else soft_val}, "
-            f"hard={'∞' if hard_val == RLIM_INFINITY else hard_val}"
+    async def ctrl(ec: pwndbg.dbg_mod.ExecutionController) -> None:
+        soft_str = "inf" if soft_val == RLIM_INFINITY else str(soft_val)
+        hard_str = "inf" if hard_val == RLIM_INFINITY else str(hard_val)
+        print(
+            f"calling setrlimit for resource {res!r} (resource={num}): "
+            f"soft={soft_str}, hard={hard_str}"
         )
-    )
+        asm = f"""
+            push {hard_val & 0xFFFFFFFFFFFFFFFF}
+            push {soft_val & 0xFFFFFFFFFFFFFFFF}
+            mov rsi, rsp
+        """
+        asm += pwnlib.shellcraft.syscall("SYS_setrlimit", num, "rsi")
+
+        shellcode_bin = pwndbg.aglib.asm.asm(asm)
+        async with pwndbg.aglib.shellcode.exec_shellcode(ec, shellcode_bin):
+            ret = pwndbg.aglib.shellcode._get_syscall_return_value()
+
+        print(message.success(f"Set {res} limit (return={ret}): soft={soft_str}, hard={hard_str}"))
+
+    pwndbg.dbg.selected_inferior().dispatch_execution_controller(ctrl)
