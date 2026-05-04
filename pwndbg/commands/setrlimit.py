@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import argparse
+import struct
 
-import pwnlib.shellcraft
+from pwnlib import shellcraft
 
+import pwndbg.aglib
 import pwndbg.aglib.asm
 import pwndbg.aglib.shellcode
 import pwndbg.color.message as message
 import pwndbg.commands
 import pwndbg.dbg_mod
+import pwndbg.lib.regs
 from pwndbg.commands import CommandCategory
+from pwndbg.commands.hijack_fd import exec_shellcode_with_stack
+from pwndbg.commands.hijack_fd import stack_size_alignment
 
 RLIM_INFINITY = -1
 LIMITS: dict[str, int] = {
@@ -56,6 +61,37 @@ def to_int_limit(val: str) -> int:
         raise
 
 
+def asm_setrlimit(num: int, soft_val: int, hard_val: int) -> tuple[int, bytes]:
+    ptrsize = pwndbg.aglib.arch.ptrsize
+
+    if ptrsize == 8:
+        rlimit_data = struct.pack(
+            "<QQ",
+            soft_val & 0xFFFFFFFFFFFFFFFF,
+            hard_val & 0xFFFFFFFFFFFFFFFF,
+        )
+    else:
+        rlimit_data = struct.pack(
+            "<II",
+            soft_val & 0xFFFFFFFF,
+            hard_val & 0xFFFFFFFF,
+        )
+
+    stack_size = stack_size_alignment(len(rlimit_data))
+
+    register_set = pwndbg.lib.regs.reg_sets[pwndbg.aglib.arch.name]
+    stack_reg = register_set.stack
+
+    asm = "".join(
+        [
+            shellcraft.pushstr(rlimit_data, False),
+            shellcraft.setrlimit(num, stack_reg),
+        ]
+    )
+
+    return stack_size, pwndbg.aglib.asm.asm(asm)
+
+
 @pwndbg.commands.Command(parser, category=CommandCategory.MISC)
 @pwndbg.commands.OnlyWhenRunning
 def setrlimit(resource: str, soft: str, hard: str | None = None) -> None:
@@ -81,18 +117,14 @@ def setrlimit(resource: str, soft: str, hard: str | None = None) -> None:
             f"calling setrlimit for resource {res!r} (resource={num}): "
             f"soft={soft_str}, hard={hard_str}"
         )
-        asm = f"""
-            push {hard_val & 0xFFFFFFFFFFFFFFFF}
-            push {soft_val & 0xFFFFFFFFFFFFFFFF}
-            mov rsi, rsp
-        """
-        asm += pwnlib.shellcraft.syscall("SYS_setrlimit", num, "rsi")
 
-        shellcode_bin = pwndbg.aglib.asm.asm(asm)
-        async with pwndbg.aglib.shellcode.exec_shellcode(ec, shellcode_bin):
+        stack_size, asm_bin = asm_setrlimit(num, soft_val, hard_val)
+
+        async with exec_shellcode_with_stack(ec, asm_bin, stack_size):
             register_set = pwndbg.lib.regs.reg_sets[pwndbg.aglib.arch.name]
-            ret: int = pwndbg.aglib.regs.read_reg(register_set.retval)
-
-        print(message.success(f"Set {res} limit (return={ret}): soft={soft_str}, hard={hard_str}"))
+            ret = pwndbg.aglib.regs.read_reg(register_set.retval)
+            print(
+                message.success(f"Set {res} limit (return={ret}): soft={soft_str}, hard={hard_str}")
+            )
 
     pwndbg.dbg.selected_inferior().dispatch_execution_controller(ctrl)
