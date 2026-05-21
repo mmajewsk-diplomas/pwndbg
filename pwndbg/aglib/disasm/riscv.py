@@ -8,11 +8,12 @@ from capstone6pwndbg.riscv import *  # noqa: F403
 from typing_extensions import override
 
 import pwndbg.aglib
-import pwndbg.aglib.disasm.arch
+import pwndbg.aglib.disasm.assistant
 import pwndbg.color.memory as mem_color
 import pwndbg.dintegration
 import pwndbg.lib.disasm.helpers as bit_math
-from pwndbg.aglib.disasm.arch import register_assign
+from pwndbg.aglib.disasm.assistant import register_assign
+from pwndbg.aglib.disasm.instruction import EnhancedOperand
 from pwndbg.aglib.disasm.instruction import InstructionCondition
 from pwndbg.aglib.disasm.instruction import PwndbgInstruction
 
@@ -130,12 +131,12 @@ CONDITION_RESOLVERS: dict[int, Callable[[list[int]], bool]] = {
 }
 
 
-class RISCVDisassemblyAssistant(pwndbg.aglib.disasm.arch.DisassemblyAssistant):
+class RISCVDisassemblyAssistant(pwndbg.aglib.disasm.assistant.DisassemblyAssistant):
     def __init__(self, architecture) -> None:
         super().__init__(architecture)
         self.architecture = architecture
 
-        self.annotation_handlers: Dict[int, Callable[[PwndbgInstruction, Emulator], None]] = {
+        self.annotation_handlers: dict[int, Callable[[PwndbgInstruction, Emulator], None]] = {
             # AUIPC
             RISCV_INS_AUIPC: self._auipc_annotator,
             # C.MV
