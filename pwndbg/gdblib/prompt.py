@@ -81,6 +81,9 @@ def thread_is_stopped() -> bool:
 def prompt_hook(*a: Any) -> None:
     global cur, context_shown, last_alive_state
 
+    if not pwndbg.config.auto_context:
+        return
+
     new = (gdb.selected_inferior(), gdb.selected_thread())
 
     if cur != new:

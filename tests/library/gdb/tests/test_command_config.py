@@ -39,3 +39,21 @@ def test_config_filtering():
 def test_config_filtering_missing():
     out = gdb.execute("config asdasdasdasd", to_string=True)
     assert out == 'No config parameter found with filter "asdasdasdasd"\n'
+
+
+def test_auto_context():
+    gdb.execute("break main")
+    gdb.execute("run")
+    
+    assert "True" in gdb.execute("config auto-context", to_string=True)
+    
+    gdb.execute("set auto-context off")
+    out = gdb.execute("next", to_string=True)
+    assert "disasm" not in out
+    
+    out = gdb.execute("ctx", to_string=True)
+    assert "disasm" in out
+    
+    gdb.execute("set auto-context on")
+    out = gdb.execute("next", to_string=True)
+    assert "disasm" in out

@@ -178,6 +178,10 @@ config_context_sections = pwndbg.config.add_param(
     "last_signal regs disasm code ghidra stack backtrace expressions threads heap_tracker",
     "which context sections are displayed (controls order)",
 )
+
+_restore_guard = False
+_last_valid_sections = str(config_context_sections.value or "")
+
 config_max_threads_display = pwndbg.config.add_param(
     "context-max-threads",
     4,
@@ -197,12 +201,19 @@ output_settings: defaultdict[str, dict[str, Any]] = defaultdict(dict)
 
 @pwndbg.config.trigger(config_context_sections)
 def validate_context_sections() -> None:
+    global _restore_guard, _last_valid_sections
+
+    if _restore_guard:
+        return
+
+    if _last_valid_sections is None:
+        _last_valid_sections = str(config_context_sections.value or "")
+
     valid_values = [
         context.__name__.replace("context_", "") for context in context_sections.values()
     ]
 
-    # If someone tries to set an empty string, we let to do that informing about possible values
-    # (so that it is possible to have no context at all)
+    # If someone tries to set an empty string, we do not let to do that informing about proper way to do it
     if not config_context_sections.value or config_context_sections.value.lower() in (
         "''",
         '""',
@@ -210,12 +221,14 @@ def validate_context_sections() -> None:
         "empty",
         "-",
     ):
-        config_context_sections.value = ""
         print(
             message.warn(
-                f"Sections set to be empty. FYI valid values are: {', '.join(valid_values)}"
+                f"To set sections to be empty use set auto-context off. FYI valid values are: {', '.join(valid_values)}"
             )
         )
+        _restore_guard = True
+        config_context_sections.value = _last_valid_sections
+        _restore_guard = False
         return
 
     for section in config_context_sections.split():
@@ -223,9 +236,12 @@ def validate_context_sections() -> None:
             print(
                 message.warn(f"Invalid section: {section}, valid values: {', '.join(valid_values)}")
             )
-            print(message.warn("(setting none of them like '' will make sections not appear)"))
-            config_context_sections.revert_default()
+            _restore_guard = True
+            config_context_sections.value = _last_valid_sections
+            _restore_guard = False
             return
+
+    _last_valid_sections = str(config_context_sections.value)
 
 
 @dataclass(frozen=True)
@@ -854,6 +870,9 @@ pwndbg.config.add_param(
 pwndbg.config.add_param("show-compact-regs-min-width", 20, "the minimum width of each column")
 pwndbg.config.add_param(
     "show-compact-regs-separation", 4, "the number of spaces separating columns"
+)
+pwndbg.config.add_param(
+    "auto-context", True, "showing context_sections automatically after every command stop"
 )
 
 
