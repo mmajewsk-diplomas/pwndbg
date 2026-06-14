@@ -59,6 +59,8 @@ c = ColorConfig(
 )
 
 # `pwndbg.arguments` imports `c` from this module.
+import contextlib
+
 import pwndbg.arguments
 
 nearpc_branch_marker = pwndbg.color.theme.add_param(
@@ -304,38 +306,37 @@ def create_branch_visualization_strings(
                         BOT_LEFT_CORNER + (expand_amount) * HORZ_SYMBOL + END_SYMBOL,
                     )
                     branch_vis_string_len += 2 + expand_amount
-        else:
-            # Backwards jump
-            if pair.start == addr:
-                if branch_vis_string:
-                    branch_vis_string = (
-                        colorize_branch_vis_line(
-                            pair_offset, BOT_LEFT_CORNER + (expand_amount) * HORZ_SYMBOL
-                        )
-                        + branch_vis_string
+        # Backwards jump
+        elif pair.start == addr:
+            if branch_vis_string:
+                branch_vis_string = (
+                    colorize_branch_vis_line(
+                        pair_offset, BOT_LEFT_CORNER + (expand_amount) * HORZ_SYMBOL
                     )
-                    branch_vis_string_len += 1 + expand_amount
-                else:
-                    branch_vis_string = colorize_branch_vis_line(
-                        pair_offset,
-                        BOT_LEFT_CORNER + (expand_amount) * HORZ_SYMBOL + START_SYMBOL,
+                    + branch_vis_string
+                )
+                branch_vis_string_len += 1 + expand_amount
+            else:
+                branch_vis_string = colorize_branch_vis_line(
+                    pair_offset,
+                    BOT_LEFT_CORNER + (expand_amount) * HORZ_SYMBOL + START_SYMBOL,
+                )
+                branch_vis_string_len += 2 + expand_amount
+        elif pair.end == addr:
+            if branch_vis_string:
+                branch_vis_string = (
+                    colorize_branch_vis_line(
+                        pair_offset, TOP_LEFT_CORNER + (expand_amount) * HORZ_SYMBOL
                     )
-                    branch_vis_string_len += 2 + expand_amount
-            elif pair.end == addr:
-                if branch_vis_string:
-                    branch_vis_string = (
-                        colorize_branch_vis_line(
-                            pair_offset, TOP_LEFT_CORNER + (expand_amount) * HORZ_SYMBOL
-                        )
-                        + branch_vis_string
-                    )
-                    branch_vis_string_len += 1 + expand_amount
-                else:
-                    branch_vis_string = colorize_branch_vis_line(
-                        pair_offset,
-                        TOP_LEFT_CORNER + (expand_amount) * HORZ_SYMBOL + END_SYMBOL,
-                    )
-                    branch_vis_string_len += 2 + expand_amount
+                    + branch_vis_string
+                )
+                branch_vis_string_len += 1 + expand_amount
+            else:
+                branch_vis_string = colorize_branch_vis_line(
+                    pair_offset,
+                    TOP_LEFT_CORNER + (expand_amount) * HORZ_SYMBOL + END_SYMBOL,
+                )
+                branch_vis_string_len += 2 + expand_amount
         if pair_offset == maximum_pair_id:
             # We don't have any more column space for more jump ranges
             break
@@ -367,10 +368,9 @@ def create_branch_visualization_strings(
             # If this pair ended at this address, nothing goes into the empty line after it
             if pair.end == addr:
                 continue
-        else:
-            # If a backwards jump started here, nothing goes in the empty line after it
-            if pair.start == addr:
-                continue
+        # If a backwards jump started here, nothing goes in the empty line after it
+        elif pair.start == addr:
+            continue
 
         if pair_offset == maximum_pair_id:
             last_iteration = True
@@ -389,7 +389,7 @@ def create_branch_visualization_strings(
         empty_line_branch_vis_string_len += 1 + num_empty_lines
 
         # Now, create the string for the non-empty line
-        if pair.start == addr or pair.end == addr:
+        if addr in (pair.start, pair.end):
             continue
 
         # Only add to the string if the space hasn't been taking by a horizontal line
@@ -417,11 +417,11 @@ def nearpc(
     lines: int | None = None,
     back_lines: int = 0,
     total_lines: int | None = None,
-    emulate=False,
-    repeat=False,
-    use_cache=False,
-    linear=False,
-    branch_visualization=False,
+    emulate: bool = False,
+    repeat: bool = False,
+    use_cache: bool = False,
+    linear: bool = False,
+    branch_visualization: bool = False,
     address_to_highlight: int | None = None,
     end_address: int | None = None,
 ) -> list[str]:
@@ -518,7 +518,7 @@ def nearpc(
         symbols_max_length = max(map(len, symbols)) if symbols else 0
         addresses_max_length = max(map(len, addresses)) if addresses else 0
 
-    assembly_strings = pwndbg.color.disasm.instructions_and_padding(instructions)
+    assembly_strings = pwndbg.color.disasm.instructions_and_padding(instructions, linear=linear)
 
     breakpoint_locations = pwndbg.dbg.breakpoint_locations()
 
@@ -652,14 +652,12 @@ def nearpc(
         #     ]
 
         # For Comment Function
-        try:
+        with contextlib.suppress(Exception):
             line += " " * 10 + ctx_color.comment(
                 pwndbg.commands.comments.file_lists[pwndbg.aglib.proc.exe()][
                     hex(instruction.address)
                 ]
             )
-        except Exception:
-            pass
 
         result.append(line)
 
