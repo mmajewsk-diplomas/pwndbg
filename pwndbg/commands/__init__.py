@@ -1082,6 +1082,7 @@ def load_commands() -> None:
     import pwndbg.commands.cyclic
     import pwndbg.commands.decompiler_integration
     import pwndbg.commands.dev
+    import pwndbg.commands.diffoutput
     import pwndbg.commands.distance
     import pwndbg.commands.dt
     import pwndbg.commands.dumpargs
@@ -1137,6 +1138,7 @@ def load_commands() -> None:
     import pwndbg.commands.rizin
     import pwndbg.commands.rop
     import pwndbg.commands.saved_register_frames
+    import pwndbg.commands.saveoutput
     import pwndbg.commands.search
     import pwndbg.commands.sigreturn
     import pwndbg.commands.slab
