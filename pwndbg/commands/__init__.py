@@ -349,11 +349,23 @@ class CommandObj:
                 # No need to do anything about it.
                 continue
 
-            if not isinstance(action, argparse._SubParsersAction) and action.help is None:
+            if isinstance(action, argparse._SubParsersAction):
+                real_names = {a.dest for a in action._choices_actions}
+                seen_parsers = set()
+                for name, subparser in action.choices.items():
+                    if id(subparser) in seen_parsers:
+                        continue
+                    seen_parsers.add(id(subparser))
+                    if name not in real_names:
+                        print(message.error(f"Error parsing arguments for command: {parser.prog}"))
+                        print("You must add a `help=` string to your subcommand.")
+                        print(f"Erroneous subcommand: '{name}'")
+                        assert False, (
+                            "You must add a `help=` string to your subcommand's add_parser() call."
+                        )
+            elif action.help is None:
                 # When we do `cmd -h` we want each argument to have a one-line
                 # description.
-                # Unfortunately, I don't know how to enforce that each subcommand has a help=
-                # passed to its add_parser() :(
                 print(message.error(f"Error parsing arguments for command: {parser.prog}"))
                 print("You must add a `help=` string to your argument.")
                 print(f"Erroneous action:\n\t{repr(action)}\n")
