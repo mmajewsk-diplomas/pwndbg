@@ -212,10 +212,10 @@ class Frame:
           to SymbolLookupType.ANY.
 
         Returns:
-        - pwndbg.dbg_mod.Value | None: The value of the symbol if found, or None if not found.
+        - pwndbg.dbg_mod.Value | None: The address of the symbol if found, or None if not found.
 
         Raises:
-        - pwndbg.dbg_mod.Error: If symbol name contains invalid characters
+        - pwndbg.dbg_mod.DebuggerError: If symbol name contains invalid characters
         """
         raise NotImplementedError()
 
@@ -230,6 +230,9 @@ class Frame:
         is a GDB-only option, and is intended for cases in which the result
         would be incorrect without it enabled, when running in GDB. Other
         debuggers should ignore this parameter.
+
+        Raises:
+            pwndbg.dbg_mod.DebuggerError: When parsing the expression fails.
         """
         raise NotImplementedError()
 
@@ -589,7 +592,7 @@ class Process:
         - pwndbg.dbg_mod.Value | None: The value of the symbol if found, or None if not found.
 
         Raises:
-        - pwndbg.dbg_mod.Error: If no object file matching the `objfile_endswith` pattern is found.
+        - pwndbg.dbg_mod.DebuggerError: If no object file matching the `objfile_endswith` pattern is found.
         """
 
     def get_function_boundaries(self, address: int) -> tuple[int, int] | None:
@@ -1097,6 +1100,18 @@ class Value:
     def __int__(self) -> int:
         """
         Converts this value to an integer, if possible.
+
+        Raises:
+            DebuggerError: When the Value is not coerceable to an int.
+        """
+        raise NotImplementedError()
+
+    def raw_bytes(self) -> bytes:
+        """
+        The raw bytes of this value
+
+        Raises:
+            DebuggerError: When the raw bytes cannot be read or the debugger does not support it
         """
         raise NotImplementedError()
 
@@ -1403,12 +1418,6 @@ class Debugger:
     def is_gdblib_available(self) -> bool:
         """
         Whether gdblib is available under this debugger.
-        """
-        raise NotImplementedError()
-
-    def string_limit(self) -> int:
-        """
-        The maximum size of a string.
         """
         raise NotImplementedError()
 

@@ -24,7 +24,7 @@ The `lint.sh` script runs ruff, shfmt, and vermin. ruff is (mostly) able to auto
     You can find the configuration files for these tools in `pyproject.toml` or by checking the arguments passed inside `lint.sh`.
     You can also run `./lint.sh -fo` to skip vermin and mypy, allowing for a quicker lint.
 
-When submitting a PR, the continuous integration (CI) job defined in `.github/workflows/lint.yml` will verify that running `./lint.sh` succeeds. Furthermore, you must not increase the number of `mypy --strict` errors as compared to the `dev` branch (see `.github/workflows/lint.sh`). Otherwise the job will fail and we won't be able to merge your PR. Make sure to have a type checker (mypy --strict, pyright, ty, pyrefly, ...) running in your python editor / IDE.
+When submitting a PR, the continuous integration (CI) job defined in `.github/workflows/lint.yml` will verify that running `./lint.sh` succeeds. Furthermore, you must not increase the number of `mypy --strict --strict-optional` errors as compared to the `dev` branch (see `.github/workflows/lint.sh`). Otherwise the job will fail and we won't be able to merge your PR. Make sure to have a type checker (mypy --strict --strict-optional, pyright, ty, pyrefly, ...) running in your python editor / IDE.
 
 It is recommended to enable the pre-push git hook to run the lint if you haven't already done so. You may re-run `./setup-dev.sh` to set it.
 ## Running tests
@@ -33,7 +33,7 @@ Your PR will not be merged without passing the testing CI. Moreover, it is highl
 To run the tests in the same environment as the testing CI, you can use the following docker commands.
 ```{.bash .copy}
 # General (x86_64) test suite
-docker compose run --rm ubuntu24.04-mount ./tests.sh -d gdb -g gdb
+docker compose run --rm ubuntu24.04-mount ./tests.sh -d gdb -g dbg
 # Cross-architecture tests
 docker compose run --rm ubuntu24.04-mount ./tests.sh -d gdb -g cross-arch-user
 # Kernel tests (x86_64 and aarch64)
@@ -64,7 +64,7 @@ If you wish to improve Pwndbg support for your distribution (or the testing infr
 The commands are analogous to the docker commands.
 ```{.bash .copy}
 # General (x86_64) test suite
-./tests.sh -d gdb -g gdb
+./tests.sh -d gdb -g dbg
 # Cross-architecture tests
 ./tests.sh -d gdb -g cross-arch-user
 # Kernel tests (x86_64 and aarch64)
