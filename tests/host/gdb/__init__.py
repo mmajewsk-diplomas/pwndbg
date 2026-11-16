@@ -45,6 +45,9 @@ class GDBTestHost(TestHost):
             + gdb_args
             + ["--eval-command", "quit"],
             env=env,
+            # don't give gdb our terminal (unless we're using --pdb)
+            # (also makes sure Ctrl-C-ing the tests works)
+            stdin=subprocess.DEVNULL if capture_output else None,
             capture_output=capture_output,
             text=True,
             cwd=self._pwndbg_root,
@@ -67,8 +70,9 @@ class GDBTestHost(TestHost):
         env = os.environ.copy()
         env["LANG"] = "en_US.UTF-8"
         env["SRC_DIR"] = str(self._pwndbg_root)
-        env["COVERAGE_FILE"] = str(coverage_out)
-        env["COVERAGE_PROCESS_START"] = str(self._pwndbg_root / "pyproject.toml")
+        if coverage_out is not None:
+            env["COVERAGE_FILE"] = str(coverage_out)
+            env["COVERAGE_PROCESS_START"] = str(self._pwndbg_root / "pyproject.toml")
         env["PWNDBG_LAUNCH_TEST"] = case
         env["NO_COLOR"] = "1"
         env["GDB_BIN_PATH"] = str(self._gdb_path)

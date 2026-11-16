@@ -38,8 +38,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import os
-import re
+import shlex
 import shutil
 import signal
 import sys
@@ -134,27 +135,6 @@ LLDB_EXCLUSIVE = [
     ("script", lambda cmd: cmd.startswith("sc") and "script".startswith(cmd)),
     ("expression", lambda cmd: cmd.startswith("e") and "expression".startswith(cmd)),
 ]
-
-
-def lex_args(args: str) -> list[str]:
-    """
-    Splits the arguments, respecting quotation marks.
-    """
-    args = args.strip()
-    result = []
-    while len(args) > 0:
-        first = re.match("\\s*(\".*\"|'.*'|\\S+)", args)
-        sl = first[1]
-
-        # Handle single and double quotes, we could do some escaping for the
-        # double quotes case, but we don't, yet.
-        sl = sl.strip('"')
-        sl = sl.strip("'")
-
-        result.append(sl)
-        args = args[first.end() :]
-
-    return result
 
 
 class EventRelay(EventHandler):
@@ -488,9 +468,14 @@ def _exec_repl_command(
     Implementation for exec_repl_command
     """
 
-    bits = lex_args(line)
+    try:
+        bits = shlex.split(line)
+    except ValueError:
+        # E.g. a trailing \ or an unclosed quote (see #4130). Most lines only need their first
+        # word, to pick the command that handles them.
+        bits = line.split()
 
-    if len(line) == 0:
+    if len(bits) == 0:
         return True
 
     # Let the user get an LLDB prompt if they so desire.
@@ -938,7 +923,6 @@ target_create_ap.add_argument("filename")
 target_create_unsupported = [
     "build",
     "no-dependents",
-    "remote-file",
     "symfile",
     "version",
 ]
@@ -1065,6 +1049,25 @@ def target_create_regular(args: Any, dbg: LLDB) -> None:
         print_error(f"could not create target for '{args.filename}': {error.description}")
         return
 
+    if args.remote_file:
+        module: lldb.SBModule = None
+        executable: lldb.SBFileSpec = target.GetExecutable()
+        if executable:
+            with contextlib.suppress(IndexError, KeyError):
+                module = target.module[executable.fullpath]
+
+        if module:
+            module.SetPlatformFileSpec(lldb.SBFileSpec(args.remote_file))
+        else:
+            # Normally it would make sense to assert on this condition, as it
+            # is something we would normally assume to be always the case at
+            # this point, but there are enough assertions in Pwndbg as things
+            # are, and this is non-essential enough that a warning should be
+            # good enough™ for it.
+            print_warn(
+                f"tried to set remote file to '{args.remote_file}', but target has no executable"
+            )
+
     dbg.debugger.SetSelectedTarget(target)
     print(f"Current executable set to '{args.filename}' ({target.triple.split('-')[0]})")
 
@@ -1099,7 +1102,6 @@ process_launch_unsupported = [
     "stdout",
     "tty",
     "structured-data-value",
-    "working-dir",
 ]
 
 
@@ -1114,11 +1116,6 @@ def process_launch(
     if result is None:
         return
     args, raw = result
-
-    launch_args = getattr(args, "run-args", []) + raw
-    if args.shell_expand_args:
-        # Perform shell expansion.
-        launch_args = [os.path.expanduser(os.path.expandvars(arg)) for arg in launch_args]
 
     targets = dbg.debugger.GetNumTargets()
     assert targets < 2
@@ -1139,6 +1136,23 @@ def process_launch(
 
     target: lldb.SBTarget = dbg.debugger.GetTargetAtIndex(0)
 
+    # Same as `process launch` in LLDB: with no arguments on the command line,
+    # use the ones from `target.run-args`. Otherwise, save the given arguments
+    # there for subsequent runs.
+    launch_args = getattr(args, "run-args", []) + raw
+    launch_info = target.GetLaunchInfo()
+    if launch_args:
+        launch_info.SetArguments(launch_args, False)
+        target.SetLaunchInfo(launch_info)
+    else:
+        launch_args = [
+            launch_info.GetArgumentAtIndex(i) for i in range(launch_info.GetNumArguments())
+        ]
+
+    if args.shell_expand_args:
+        # Perform shell expansion.
+        launch_args = [os.path.expanduser(os.path.expandvars(arg)) for arg in launch_args]
+
     # Make sure LLDB knows the correct remote or local status of this launch.
     dbg._current_process_is_gdb_remote = driver.has_connection()
 
@@ -1152,7 +1166,7 @@ def process_launch(
         io_driver,
         [f"{name}={value}" for name, value in os.environ.items()] + (args.environment or []),
         launch_args,
-        os.getcwd(),
+        getattr(args, "working_dir", os.getcwd()),
         args.disable_aslr,
     )
 

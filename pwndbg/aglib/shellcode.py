@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 from asyncio import CancelledError
+from collections.abc import AsyncIterator
 from collections.abc import Iterator
 
 import pwnlib.shellcraft
@@ -29,7 +30,7 @@ def _get_syscall_return_value():
     just returned.
     """
 
-    register_set = pwndbg.lib.regs.reg_sets[pwndbg.aglib.arch.name]
+    register_set = pwndbg.aglib.arch.reg_set
     # FIXME: `retval` is syscall abi? or sysv abi?
     return pwndbg.aglib.regs.read_reg(register_set.retval)
 
@@ -91,7 +92,7 @@ def _ctx_code(starting_address: int, blob) -> Iterator[None]:
 
 @contextlib.contextmanager
 def _ctx_registers() -> Iterator[int]:
-    register_set = pwndbg.lib.regs.reg_sets[pwndbg.aglib.arch.name]
+    register_set = pwndbg.aglib.arch.reg_set
     preserve_set = register_set.gpr + register_set.args + (register_set.pc, register_set.stack)
 
     uncached_regs = pwndbg.dbg.selected_frame().regs()
@@ -169,3 +170,44 @@ async def exec_shellcode(ec: ExecutionController, blob):
                 yield
             finally:
                 pass
+
+
+def stack_size_alignment(s: int) -> int:
+    """Reserve stack space aligned to the target syscall ABI."""
+    syscall_abi = pwndbg.aglib.arch.syscall_abi
+    if syscall_abi is None:
+        raise pwndbg.dbg_mod.DebuggerError("Syscall ABI not defined for current architecture")
+
+    return s + (syscall_abi.arg_alignment - (s % syscall_abi.arg_alignment))
+
+
+@contextlib.asynccontextmanager
+async def exec_shellcode_with_stack(
+    ec: ExecutionController, blob: bytes, stack_size: int
+) -> AsyncIterator[None]:
+    """Execute shellcode while preserving the specified area below the stack pointer."""
+    # This function could be improved, for example:
+    # - Run the shellcode inside an emulator like Unicorn
+    # - Calculate the maximum stack size the shellcode would consume dynamically.
+
+    stack_start_diff = pwndbg.aglib.regs.sp
+    if stack_start_diff is None:
+        raise RuntimeError("Stack pointer is unavailable")
+    stack_start = stack_start_diff - stack_size
+    original_stack = pwndbg.aglib.memory.read(stack_start, stack_size)
+
+    try:
+        async with exec_shellcode(ec, blob):
+            stack_end = pwndbg.aglib.regs.sp
+            if stack_end is None:
+                raise RuntimeError("Stack pointer is unavailable after executing shellcode")
+            stack_diff_size = stack_start_diff - stack_end
+
+            # Make sure stack is not corrupted somehow
+            assert not (stack_diff_size > stack_size), (
+                f"stack is probably corrupted size_current={stack_diff_size} size_max_want={stack_size}"
+            )
+
+            yield
+    finally:
+        pwndbg.aglib.memory.write(stack_start, original_stack)
