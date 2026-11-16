@@ -30,6 +30,7 @@ else
 endif
 
 ZIGCC           = uv run python3 -m ziglang cc
+ZIGXX           = uv run python3 -m ziglang c++
 PKG_CONFIG      ?=     pkg-config
 CC              =      gcc
 CXX             =      g++
@@ -52,6 +53,8 @@ HAVE_JEMALLOC := $(shell $(PKG_CONFIG) --exists jemalloc && echo yes || echo no)
 ifeq ($(HAVE_JEMALLOC),yes)
 JEMALLOC_CFLAGS := $(shell $(PKG_CONFIG) --cflags jemalloc)
 JEMALLOC_LIBS   := $(shell $(PKG_CONFIG) --libs jemalloc)
+# The targets link jemalloc statically, but some distros (e.g. Arch) only ship the shared library.
+HAVE_JEMALLOC := $(shell printf 'int main(void){return 0;}' | $(ZIGCC) -x c -o /dev/null - $(JEMALLOC_CFLAGS) -Wl,-Bstatic $(JEMALLOC_LIBS) -Wl,-Bdynamic >/dev/null 2>&1 && echo yes || echo no)
 endif
 
 # musl is available if musl-gcc compiles+links a trivial program,
@@ -202,7 +205,7 @@ else
 ALL_MUSL_VERSION_TARGETS :=
 endif
 
-CUSTOM_TARGETS = heap_find_fake_fast.native.out reference_bin_plt_pie_no_relro.x86-64.out reference_bin_plt_no_pie_no_relro.i386.out reference_bin_pie.native.out reference_bin_nopie.native.out reference_bin_nopie.i386.out symbol_1600_and_752.native.out initialized_heap.x86-64.out initialized_heap_big.i386.out linked_lists.native.out onegadget.x86-64.out onegadget.i386.out heap_musl_dyn.native.out heap_musl_static.native.out heap_musl_static_stripped.native.out gosample.i386.out gosample.x86-64.out exithandlers.native.out
+CUSTOM_TARGETS = heap_find_fake_fast.native.out reference_bin_plt_pie_no_relro.x86-64.out reference_bin_plt_no_pie_no_relro.i386.out reference_bin_pie.native.out reference_bin_nopie.native.out reference_bin_nopie.i386.out initialized_heap.x86-64.out initialized_heap_big.i386.out linked_lists.native.out onegadget.x86-64.out onegadget.i386.out heap_musl_dyn.native.out heap_musl_static.native.out heap_musl_static_stripped.native.out gosample.i386.out gosample.x86-64.out exithandlers.native.out weird_symbols.native.out weird_symbols_nodebug.native.out
 NATIVE_CUSTOM_TARGETS  := $(filter %.native.out %.$(HOST_ARCH).out %.$(HOST_ARCH_32).out,$(CUSTOM_TARGETS))
 
 ALL_TARGETS := $(LINKED_C) $(LINKED_ASM) $(LINKED_GO) $(NATIVE_CUSTOM_TARGETS) \
@@ -216,6 +219,17 @@ all: $(ALL_TARGETS)
 %.out : %.c
 	@echo "[+] Building '$@'"
 	${ZIGCC} ${CFLAGS} -w -o $@ $?
+
+%.out : %.cpp
+	@echo "[+] Building '$@'"
+	${ZIGXX} ${CFLAGS} -std=c++20 -o $@ $?
+
+# zig links a libc++ that has its own debug info
+weird_symbols_nodebug.native.out: weird_symbols.native.cpp
+	@echo "[+] Building '$@'"
+	${ZIGXX} ${CFLAGS} -std=c++20 -o $@ $?
+	strip --strip-debug $@
+
 
 %.out : %.asm
 	@echo "[+] Building '$@'"
@@ -306,7 +320,7 @@ heap_jemalloc_extent_info.native.out: heap_jemalloc_extent_info.native.c
 heap_jemalloc_heap.native.out: heap_jemalloc_heap.native.c
 	@echo "[!] Skip '$@'"
 
-$(info [!] jemalloc not found via $(PKG_CONFIG) – skipping jemalloc targets)
+$(info [!] static jemalloc not found via $(PKG_CONFIG) – skipping jemalloc targets)
 
 endif
 
@@ -430,8 +444,9 @@ reference_bin_nopie.i386.out: reference-binary.native.c
 	@echo "[+] Building '$@'"
 	${ZIGCC} -fno-pie -target x86-linux-gnu -o $@ $?
 
-symbol_1600_and_752.native.out: symbol_1600_and_752.native.cpp
-	${CXX} -O0 -ggdb -Wno-pmf-conversions -o $@ $?
+static_ifunc.native.out: static_ifunc.native.c
+	@echo "[+] Building '$@'"
+	${ZIGCC} -static -no-pie -fno-pie -nostdlib -o $@ $?
 
 canary.x86-64.out: canary.x86-64.c
 	@echo "[+] Building '$@'"

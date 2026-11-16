@@ -3,8 +3,6 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Callable
 
-from capstone6pwndbg import *  # noqa: F403
-
 import pwndbg
 import pwndbg.aglib
 import pwndbg.aglib.disasm.disassembly
@@ -22,10 +20,10 @@ from pwndbg.aglib.disasm.instruction import SplitType
 from pwndbg.color import ColorConfig
 from pwndbg.color import ColorParamSpec
 from pwndbg.color import blue
+from pwndbg.color import cyan
 from pwndbg.color import gray
 from pwndbg.color import green
 from pwndbg.color import light_gray
-from pwndbg.color import light_green
 from pwndbg.color import light_purple
 from pwndbg.color import light_red
 from pwndbg.color import message
@@ -139,6 +137,7 @@ COLUMNS_ALLOCATED_FOR_BRANCH_VISUALIZATION = 20
 # Symbols used in branch visualization
 TOP_LEFT_CORNER = "┌"
 BOT_LEFT_CORNER = "└"
+VERTICAL_T = "├"
 HORZ_SYMBOL = "─"
 VERT_SYMBOL = "│"
 START_SYMBOL = "<"
@@ -146,28 +145,31 @@ END_SYMBOL = ">"
 DOTTED_VERTICAL = "╎"
 UP_SYMBOL = "▲"
 
-offset_to_color_map: dict[int, Callable[[str], str]] = {
-    0: white,
-    1: red,
-    2: green,
-    3: purple,
-    4: blue,
-    5: white,
-    6: yellow,
-    7: light_red,
-    8: light_purple,
-    9: light_gray,
-    10: light_green,
-}
+# Map the offset of a branch viz line (index into this list) to the color to display it
+# The order has been handpicked to prevent similar colors being too close to each other
+offset_to_color_map: tuple[Callable[[str], str], ...] = (
+    white,
+    red,
+    green,
+    purple,
+    blue,
+    yellow,
+    light_red,
+    light_gray,
+    cyan,
+    light_purple,
+)
+
+NUMBER_OF_OFFSET_COLORS = len(offset_to_color_map)
+
+
+def colorize_branch_vis_line(offset: int, string: str) -> str:
+    return offset_to_color_map[offset % NUMBER_OF_OFFSET_COLORS](string)
 
 
 # Allows to the branch visualization work across repeated uses of nearpc
 # Maps the jump range to the id it was given.
 last_run_ids: dict[JumpRange, int] = {}
-
-
-def colorize_branch_vis_line(offset: int, string: str) -> str:
-    return offset_to_color_map.get(offset, lambda x: str(x))(string)
 
 
 def preprocess_branch_visualization(
@@ -194,7 +196,16 @@ def preprocess_branch_visualization(
     for instruction in instructions:
         if instruction.jump_like and not instruction.call_like:
             if instruction.has_jump_target:
-                jumps.append(JumpRange(instruction.address, instruction.target))
+                address_page = pwndbg.aglib.vmmap.find(instruction.address)
+                target_page = pwndbg.aglib.vmmap.find(instruction.target)
+
+                # Only show branch visualization if the target is in the same
+                # address region as the target
+                # Otherwise, we will never get to the target, and the visualization
+                # adds clutter
+                if address_page == target_page:
+                    jumps.append(JumpRange(instruction.address, instruction.target))
+
             elif instruction.target_memory_operand is not None:
                 # This is a `jmp [mem]` instruction, and this value is the target based on the current process state
                 target = instruction.target_memory_operand.value
@@ -238,23 +249,25 @@ def preprocess_branch_visualization(
         if pair_id[pair1] >= 0:
             continue
 
-        cur_offset = 0
-        for pair2 in jumps:
-            if pair1 == pair2:
-                continue
+        # Get list of all id's for jumps ranges that overlap this one
+        overlapping_ids = {
+            pair_id[pair2] for pair2 in jumps if pair1 is not pair2 and pair1.overlaps(pair2)
+        }
 
-            if pair1.overlaps(pair2):
-                # These two jump ranges overlap! Make sure pair1 has a larger offset!
-                if pair_id[pair2] >= cur_offset:
-                    cur_offset = pair_id[pair2] + 1
-
-        # We only want a maximum number of columns
-        pair_id[pair1] = min(cur_offset, maximum_pair_id)
+        # Get the smallest free id. If all are taken, share the last column
+        free_id = 0
+        while free_id < maximum_pair_id and free_id in overlapping_ids:
+            free_id += 1
+        pair_id[pair1] = free_id
 
     # Sort lists of jump ranges by ascending id
     for instruction in instructions:
         pairs = pair_map[instruction.address]
-        pairs.sort(key=lambda x: pair_id[x])
+        # If two jump ranges have the same id (due to us saturating id's at a max value),
+        # put the one that starts/ends here first.
+        # This allows later loop to correctly print jump start/end, as we usually quit
+        # after we process the first max id
+        pairs.sort(key=lambda x: (pair_id[x], instruction.address not in (x.start, x.end)))
 
     last_run_ids = pair_id
 
@@ -285,6 +298,23 @@ def create_branch_visualization_strings(
     empty_line_branch_vis_string = ""
     empty_line_branch_vis_string_len = 0
 
+    # Allows us to handling "merging" branch viz lines that all saturate to the max column
+    saturated_pairs = [pair for pair in pair_map[addr] if pair_id[pair] == maximum_pair_id]
+    saturated_line_from_above = any(pair.min < addr for pair in saturated_pairs)
+    saturated_line_continues_below = any(pair.max > addr for pair in saturated_pairs)
+
+    def get_top_corner_char(pair_offset: int) -> str:
+        # Corner of a line that goes down from this address
+        if pair_offset == maximum_pair_id and saturated_line_from_above:
+            return VERTICAL_T
+        return TOP_LEFT_CORNER
+
+    def get_bottom_corner_char(pair_offset: int) -> str:
+        # Corner of a line that comes from above and ends at this address
+        if pair_offset == maximum_pair_id and saturated_line_continues_below:
+            return VERTICAL_T
+        return BOT_LEFT_CORNER
+
     # First, handle creating the horizontal lines (handling all the jumps that are start or end here)
     for pair in pair_map[addr]:
         # Due to preprocessing, we are iterating jump ranges at this address in order of smallest to largest id
@@ -299,7 +329,8 @@ def create_branch_visualization_strings(
                 if branch_vis_string:
                     branch_vis_string = (
                         colorize_branch_vis_line(
-                            pair_offset, TOP_LEFT_CORNER + (expand_amount) * HORZ_SYMBOL
+                            pair_offset,
+                            get_top_corner_char(pair_offset) + (expand_amount) * HORZ_SYMBOL,
                         )
                         + branch_vis_string
                     )
@@ -307,14 +338,17 @@ def create_branch_visualization_strings(
                 else:
                     branch_vis_string = colorize_branch_vis_line(
                         pair_offset,
-                        TOP_LEFT_CORNER + (expand_amount) * HORZ_SYMBOL + START_SYMBOL,
+                        get_top_corner_char(pair_offset)
+                        + (expand_amount) * HORZ_SYMBOL
+                        + START_SYMBOL,
                     )
                     branch_vis_string_len += 2 + expand_amount
             elif pair.end == addr:
                 if branch_vis_string:
                     branch_vis_string = (
                         colorize_branch_vis_line(
-                            pair_offset, BOT_LEFT_CORNER + (expand_amount) * HORZ_SYMBOL
+                            pair_offset,
+                            get_bottom_corner_char(pair_offset) + (expand_amount) * HORZ_SYMBOL,
                         )
                         + branch_vis_string
                     )
@@ -322,7 +356,9 @@ def create_branch_visualization_strings(
                 else:
                     branch_vis_string = colorize_branch_vis_line(
                         pair_offset,
-                        BOT_LEFT_CORNER + (expand_amount) * HORZ_SYMBOL + END_SYMBOL,
+                        get_bottom_corner_char(pair_offset)
+                        + (expand_amount) * HORZ_SYMBOL
+                        + END_SYMBOL,
                     )
                     branch_vis_string_len += 2 + expand_amount
         # Backwards jump
@@ -330,7 +366,8 @@ def create_branch_visualization_strings(
             if branch_vis_string:
                 branch_vis_string = (
                     colorize_branch_vis_line(
-                        pair_offset, BOT_LEFT_CORNER + (expand_amount) * HORZ_SYMBOL
+                        pair_offset,
+                        get_bottom_corner_char(pair_offset) + (expand_amount) * HORZ_SYMBOL,
                     )
                     + branch_vis_string
                 )
@@ -338,14 +375,17 @@ def create_branch_visualization_strings(
             else:
                 branch_vis_string = colorize_branch_vis_line(
                     pair_offset,
-                    BOT_LEFT_CORNER + (expand_amount) * HORZ_SYMBOL + START_SYMBOL,
+                    get_bottom_corner_char(pair_offset)
+                    + (expand_amount) * HORZ_SYMBOL
+                    + START_SYMBOL,
                 )
                 branch_vis_string_len += 2 + expand_amount
         elif pair.end == addr:
             if branch_vis_string:
                 branch_vis_string = (
                     colorize_branch_vis_line(
-                        pair_offset, TOP_LEFT_CORNER + (expand_amount) * HORZ_SYMBOL
+                        pair_offset,
+                        get_top_corner_char(pair_offset) + (expand_amount) * HORZ_SYMBOL,
                     )
                     + branch_vis_string
                 )
@@ -353,7 +393,7 @@ def create_branch_visualization_strings(
             else:
                 branch_vis_string = colorize_branch_vis_line(
                     pair_offset,
-                    TOP_LEFT_CORNER + (expand_amount) * HORZ_SYMBOL + END_SYMBOL,
+                    get_top_corner_char(pair_offset) + (expand_amount) * HORZ_SYMBOL + END_SYMBOL,
                 )
                 branch_vis_string_len += 2 + expand_amount
         if pair_offset == maximum_pair_id:
@@ -445,11 +485,16 @@ def nearpc(
     end_address: int | None = None,
     max_backwards_linear_count: int | None = None,
     instruction_flow_cache: pwndbg.aglib.disasm.disassembly.InstructionFlowCache | None = None,
+    all_opcode_bytes: bool = False,
+    opcode_bytes: int | None = None,
 ) -> list[str]:
     """
     Disassemble near a specified address.
 
     The `linear` argument specifies if we should disassemble linearly in memory, or take jumps into account
+
+    The `all_opcode_bytes` argument shows opcode bytes of each instruction instead of the
+    number set by `nearpc-num-opcode-bytes`, and `opcode_bytes` replaces that number
     """
     assert address_to_highlight is None or linear, (
         "Only pc can be highlighted if linear=False"  # because we need pc_index to display emulated loops correctly
@@ -567,6 +612,11 @@ def nearpc(
     current_insn_breakpoint_prefix = current_breakpoint_sign.ljust(len(prefix_sign) + 1)
     current_insn_breakpoint_prefix = c.breakpoint(c.prefix(current_insn_breakpoint_prefix))
 
+    num_opcode_bytes = int(show_opcode_bytes) if opcode_bytes is None else opcode_bytes
+    if all_opcode_bytes:
+        # Make room for the longest instruction shown, so that no instruction is truncated
+        num_opcode_bytes = max((len(instruction.bytes) for instruction in instructions), default=0)
+
     # Print out each instruction
     for i, (address_str, symbol, instruction, asm) in enumerate(
         zip(addresses, symbols, instructions, assembly_strings)
@@ -613,16 +663,16 @@ def nearpc(
             symbol = ctx_color.highlight(symbol)
 
         opcodes = ""
-        if show_opcode_bytes > 0:
+        if num_opcode_bytes > 0:
             opcodes = (opcode_separator_bytes * " ").join(
-                f"{c:02x}" for c in instruction.bytes[: int(show_opcode_bytes)]
+                f"{c:02x}" for c in instruction.bytes[:num_opcode_bytes]
             )
             # Must add +3 at minimum, due to truncated instructions adding "..."
-            align = show_opcode_bytes * 2 + 3
+            align = num_opcode_bytes * 2 + 3
             if opcode_separator_bytes > 0:
                 # add the length of the maximum number of separators to the alignment
-                align += (show_opcode_bytes - 1) * opcode_separator_bytes  # type: ignore[operator]
-            if len(instruction.bytes) > show_opcode_bytes:
+                align += (num_opcode_bytes - 1) * opcode_separator_bytes  # type: ignore[operator]
+            if len(instruction.bytes) > num_opcode_bytes:
                 opcodes += pwndbg.color.gray("...")
                 # the length of gray("...") is 12, so we need to add extra 9 (12-3) alignment length for the invisible characters
                 align += 9  # len(pwndbg.color.gray(""))
@@ -632,7 +682,11 @@ def nearpc(
 
         if branch_visualization:
             branch_vis_string, empty_line_branch_vis_string = create_branch_visualization_strings(
-                pair_map, pair_id, maximum_pair_id, instruction.address, i == 0
+                pair_map,
+                pair_id,
+                maximum_pair_id,
+                instruction.address,
+                i == 0,
             )
         else:
             branch_vis_string = None

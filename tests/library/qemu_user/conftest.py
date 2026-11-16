@@ -15,7 +15,7 @@ import gdb
 import pytest
 
 from pwndbg.lib import tempfile
-from pwndbg.lib.zig import get_zig_executable
+from pwndbg.lib.compiler.zig import _get_executable
 
 _start_binary_called = False
 
@@ -54,7 +54,8 @@ COMPILE_AND_RUN_INFO: dict[COMPILATION_TARGETS_TYPE, tuple[str, tuple[str, ...],
     "mips64el": ("mips64el-freestanding", (), "mips64el"),
     "loongarch64": ("loongarch64-freestanding", (), "loongarch64"),
     "s390x": ("s390x-freestanding", (), "s390x"),
-    "sparc64": ("sparc64-freestanding", (), "sparc64"),
+    # -flto forces the use of lld, instead of Zigs linker (which has non-determinism)
+    "sparc64": ("sparc64-freestanding", ("-flto",), "sparc64"),
     "powerpc32": ("powerpc-freestanding", (), "ppc"),
     "powerpc64": ("powerpc64-freestanding", (), "ppc64"),
     "powerpc64le": ("powerpc64le-freestanding", (), "ppc64le"),
@@ -151,7 +152,7 @@ def qemu_assembly_run():
         compiled_file: Path = tmpdir / "out.elf"
 
         # Build the binary with Zig
-        zig_executable = get_zig_executable()
+        zig_executable = _get_executable()
         compile_process = subprocess.run(
             [
                 zig_executable,
