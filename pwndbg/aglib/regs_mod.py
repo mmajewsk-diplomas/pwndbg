@@ -21,7 +21,6 @@ from pwndbg.dbg_mod import EventType
 from pwndbg.lib.regs import BitFlags
 from pwndbg.lib.regs import KernelRegisterSet
 from pwndbg.lib.regs import RegisterSet
-from pwndbg.lib.regs import reg_sets
 
 # We need to manually make some ptrace calls to get fs/gs bases on Intel
 PTRACE_ARCH_PRCTL = 30
@@ -131,6 +130,30 @@ class RegisterManager:
             return None
         return self.read_reg_in_frame(reg, frame, *aliases)
 
+    @pwndbg.lib.cache.cache_until("stop")
+    def read_reg_abstract_value_in_frame(
+        self, reg: str, frame: pwndbg.dbg_mod.Frame
+    ) -> pwndbg.dbg_mod.Value | None:
+        """
+        Read a register and return a Value (instead of converting it into an integer)
+        """
+        try:
+            return self.get_register(reg.lstrip("$"), frame)
+        except (ValueError, pwndbg.dbg_mod.DebuggerError):
+            return None
+
+    def read_reg_abstract_value(self, reg: str) -> pwndbg.dbg_mod.Value | None:
+        """
+        Read a register and return a Value (instead of converting it into an integer)
+
+        Use this for registers that are not represented as an integer in the debugger API
+        For example, vector registers (xmm0 in x86) are a passed as a struct
+        """
+        frame = pwndbg.dbg.selected_frame()
+        if frame is None:
+            return None
+        return self.read_reg_abstract_value_in_frame(reg, frame)
+
     def write_reg(self, reg: str, value: int) -> None:
         if not pwndbg.dbg.selected_frame().reg_write(reg, value):
             raise RuntimeError(f"Attempted to write to a non-existent register '{reg}'")
@@ -155,55 +178,55 @@ class RegisterManager:
         self.write_reg(self.current.stack, val)
 
     def __contains__(self, reg: str) -> bool:
-        return reg_sets[pwndbg.aglib.arch.name].__contains__(reg)
+        return pwndbg.aglib.arch.reg_set.__contains__(reg)
 
     def __iter__(self) -> Iterator[str]:
-        return reg_sets[pwndbg.aglib.arch.name].__iter__()
+        return pwndbg.aglib.arch.reg_set.__iter__()
 
     @property
     def current(self) -> RegisterSet:
-        return reg_sets[pwndbg.aglib.arch.name]
+        return pwndbg.aglib.arch.reg_set
 
     # TODO: All these should be able to do self.current
     @property
     def gpr(self) -> tuple[str, ...]:
-        return reg_sets[pwndbg.aglib.arch.name].gpr
+        return pwndbg.aglib.arch.reg_set.gpr
 
     @property
     def common(self) -> list[str]:
-        return reg_sets[pwndbg.aglib.arch.name].common
+        return pwndbg.aglib.arch.reg_set.common
 
     @property
     def frame(self) -> str | None:
-        return reg_sets[pwndbg.aglib.arch.name].frame
+        return pwndbg.aglib.arch.reg_set.frame
 
     @property
     def retaddr(self) -> tuple[str, ...]:
-        return reg_sets[pwndbg.aglib.arch.name].retaddr
+        return pwndbg.aglib.arch.reg_set.retaddr
 
     @property
     def kernel(self) -> KernelRegisterSet | None:
-        return reg_sets[pwndbg.aglib.arch.name].kernel
+        return pwndbg.aglib.arch.reg_set.kernel
 
     @property
     def flags(self) -> dict[str, BitFlags]:
-        return reg_sets[pwndbg.aglib.arch.name].flags
+        return pwndbg.aglib.arch.reg_set.flags
 
     @property
     def extra_flags(self) -> dict[str, BitFlags]:
-        return reg_sets[pwndbg.aglib.arch.name].extra_flags
+        return pwndbg.aglib.arch.reg_set.extra_flags
 
     @property
     def stack(self) -> str:
-        return reg_sets[pwndbg.aglib.arch.name].stack
+        return pwndbg.aglib.arch.reg_set.stack
 
     @property
     def retval(self) -> str | None:
-        return reg_sets[pwndbg.aglib.arch.name].retval
+        return pwndbg.aglib.arch.reg_set.retval
 
     @property
     def all(self) -> set[str]:
-        return reg_sets[pwndbg.aglib.arch.name].all
+        return pwndbg.aglib.arch.reg_set.all
 
     def fix(self, expression: str) -> str:
         """
@@ -211,7 +234,7 @@ class RegisterManager:
         It takes in a string with a register name, "rax", and prefixes it with
         a $ ("$rax") so that the underlying debugger can evaluate it to resolve the value
         """
-        expression = pwndbg.aglib.regs.current.resolve_aliases(expression)
+        expression = self.current.resolve_aliases(expression)
         for regname in self.all:
             expression = re.sub(rf"\$?\b{regname}\b", r"$" + regname, expression)
         return expression
@@ -219,8 +242,6 @@ class RegisterManager:
     def items(self) -> Generator[tuple[str, Any], None, None]:
         for regname in self.all:
             yield regname, self.read_reg(regname)
-
-    reg_sets = reg_sets
 
     @property
     def changed(self) -> list[str]:

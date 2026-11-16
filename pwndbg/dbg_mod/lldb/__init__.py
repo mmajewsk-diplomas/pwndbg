@@ -29,16 +29,16 @@ from typing_extensions import override
 import pwndbg
 import pwndbg.dbg_mod
 import pwndbg.lib.cache
+import pwndbg.lib.lexer
 import pwndbg.lib.memory
 import pwndbg.lib.path
-import pwndbg.lib.strings
 from pwndbg.color import message
+from pwndbg.dbg_mod import DebuggerError
 from pwndbg.dbg_mod import EventHandlerPriority
 from pwndbg.dbg_mod import selection
 from pwndbg.lib import TypeNotFoundError
 from pwndbg.lib.arch import ArchDefinition
 from pwndbg.lib.arch import Platform
-from pwndbg.lib.regs import reg_sets
 from pwndbg.lib.siginfo import SigInfo
 from pwndbg.lib.siginfo import SigInfoKill
 from pwndbg.lib.siginfo import SigInfoRt
@@ -180,7 +180,7 @@ class LLDBFrame(pwndbg.dbg_mod.Frame):
         if name not in pwndbg.aglib.regs:
             return False
 
-        current_reg_set = reg_sets[pwndbg.aglib.arch.name]
+        current_reg_set = pwndbg.aglib.arch.reg_set
 
         full_reg_name = name
         if reg_info := current_reg_set.full_register_lookup.get(name):
@@ -766,17 +766,35 @@ class LLDBValue(pwndbg.dbg_mod.Value):
 
     @override
     def __int__(self) -> int:
+        error = lldb.SBError()
+
         # use unsigned in every pointer type
         if self.type.code == pwndbg.dbg_mod.TypeCode.POINTER:
-            return self.inner.GetValueAsUnsigned()
+            value = self.inner.GetValueAsUnsigned(error)
+        else:
+            # Logic is copied from lldb.value(self.inner).__int__()
+            # We deviate in that we raise instead of returning 0 on error
+            is_num, is_sign = lldb.is_numeric_type(
+                self.inner.GetType().GetCanonicalType().GetBasicType()
+            )
+            if is_num and not is_sign:
+                value = self.inner.GetValueAsUnsigned(error)
+            else:
+                value = self.inner.GetValueAsSigned(error)
 
-        # Logic is copied from lldb.value(self.inner).__int__()
-        is_num, is_sign = lldb.is_numeric_type(
-            self.inner.GetType().GetCanonicalType().GetBasicType()
-        )
-        if is_num and not is_sign:
-            return self.inner.GetValueAsUnsigned()
-        return self.inner.GetValueAsSigned()
+        if not error.Success():
+            raise pwndbg.dbg_mod.DebuggerError(f"cannot convert value to int: {error}")
+
+        return value
+
+    @override
+    def raw_bytes(self) -> bytes:
+        data = self.inner.GetData()
+        error = lldb.SBError()
+        raw = data.ReadRawData(error, 0, data.GetByteSize())
+        if not error.Success():
+            raise pwndbg.dbg_mod.DebuggerError(f"cannot get the raw bytes of value: {error}")
+        return bytes(raw)
 
     @override
     def cast(self, type: pwndbg.dbg_mod.Type | Any) -> pwndbg.dbg_mod.Value:
@@ -1593,12 +1611,16 @@ class LLDBProcess(pwndbg.dbg_mod.Process):
             return None
 
         for module_id in range(self.target.GetNumModules() + 1):
-            # This is the same as `tls_base->dtv[module_id].pointer.val + offset`.
-            candidate = int(tls_base_typed["dtv"][module_id]["pointer"]["val"]) + offset
-            if pwndbg.aglib.memory.peek(candidate):
-                # Take a guess that we hit the right TLS block and return what
-                # we got.
-                return candidate
+            try:
+                # This is the same as `tls_base->dtv[module_id].pointer.val + offset`.
+                candidate = int(tls_base_typed["dtv"][module_id]["pointer"]["val"]) + offset
+                if pwndbg.aglib.memory.peek(candidate):
+                    # Take a guess that we hit the right TLS block and return what
+                    # we got.
+                    return candidate
+            except DebuggerError:
+                # May happen on int() conversion
+                pass
 
         print(
             f"warning: symbol '{sym.GetName()}' might be a TLS symbol, but it could not be resolved"
@@ -1911,7 +1933,9 @@ class LLDBProcess(pwndbg.dbg_mod.Process):
         elif arch_name == "riscv64":
             # Pwndbg use a different name for riscv64.
             arch_name = "rv64"
-        elif arch_name in ("powerpc", "powerpc64le", "ppc64le"):
+        elif arch_name in ("powerpc64", "powerpc64le", "powerpc", "ppc64le"):
+            # LLDB uses "powerpc64" and "powerpc64le" in the target triple for
+            # 64-bit PowerPC, but Pwndbg uses the unified name "powerpc".
             arch_name = "powerpc"
 
         # Distinguish Apple platforms, default to Linux otherwise.
@@ -2330,7 +2354,8 @@ class LLDB(pwndbg.dbg_mod.Debugger):
 
     @override
     def lex_args(self, command_line: str) -> list[str]:
-        return pwndbg.lib.strings.lex_args(command_line)
+        # Clang reads 'A::foo(int, int)' as a character literal
+        return pwndbg.lib.lexer.lex_debugger_command(command_line, strip_single_quotes=True)
 
     def _any_inferior(self) -> LLDBProcess:
         """
@@ -2577,10 +2602,6 @@ class LLDB(pwndbg.dbg_mod.Debugger):
 
         literal: Literal["att", "intel"] = flavor
         return literal
-
-    @override
-    def string_limit(self) -> int:
-        return 200
 
     @override
     def get_cmd_window_size(self) -> tuple[int, int]:

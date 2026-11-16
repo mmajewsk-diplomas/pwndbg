@@ -1,32 +1,31 @@
 from __future__ import annotations
+
 import argparse
 
-import pwndbg.commands
-from pwndbg.commands import CommandCategory
-import pwndbg.color.message as message
-import pwndbg.dbg as dbg
+from pwnlib import shellcraft
 
-if dbg.is_gdblib_available():
-    import gdb
+import pwndbg.aglib
+import pwndbg.aglib.asm
+import pwndbg.aglib.shellcode
+import pwndbg.commands
+import pwndbg.dbg_mod
+from pwndbg.color import message
+from pwndbg.commands import CommandCategory
+from pwndbg.lib.rlimit import LINUX_RLIMITS
+from pwndbg.lib.rlimit import infinity
+from pwndbg.lib.rlimit import resource_id
 
 RLIM_INFINITY = -1
-LIMITS: dict[str, int] = {
-    'core':   4,
-    'cpu':    0,
-    'fsize':  1,
-    'data':   2,
-    'stack':  3,
-    'nofile': 7,
-    'as':     9,
-}
+
 
 parser = argparse.ArgumentParser(
     description="Set a POSIX resource limit in the debugged process.",
 )
 parser.add_argument(
     "resource",
-    type=str,
-    help="Which resource to limit: " + ", ".join(LIMITS.keys()),
+    type=str.lower,
+    choices=sorted(LINUX_RLIMITS),
+    help="Which resource to limit",
 )
 parser.add_argument(
     "soft",
@@ -36,71 +35,84 @@ parser.add_argument(
 parser.add_argument(
     "hard",
     type=str,
-    nargs='?',
+    nargs="?",
     default=None,
     help="Hard limit value (integer) or 'infinite' (defaults to soft)",
 )
 
 
-def _invoke_setrlimit(num: int, soft_val: int, hard_val: int) -> str:
-    if dbg.is_gdblib_available():
-        return gdb.execute(
-            f"call (int) setrlimit({num}, "
-            f"(struct rlimit[]){{ {{ {soft_val}, {hard_val} }} }})",
-            to_string=True,
-        )
-    else:
-        import lldb
-        ci     = lldb.debugger.GetCommandInterpreter()
-        result = lldb.SBCommandReturnObject()
-        cmd    = (
-            f"expr -- (int) setrlimit({num}, "
-            f"(struct rlimit){{ .rlim_cur = {soft_val}, .rlim_max = {hard_val} }})"
-        )
-        ci.HandleCommand(cmd, result)
-        if not result.Succeeded():
-            raise RuntimeError("LLDB error: " + result.GetError())
-        return result.GetOutput()
+def to_int_limit(val: str) -> int:
+    lv = val.lower()
+    if lv in ("infinite", "unlimited"):
+        return RLIM_INFINITY
+    try:
+        return int(val)
+    except ValueError:
+        print(message.error(f"Invalid limit '{val}'"))
+        raise
+
+
+def asm_setrlimit(num: int, soft_val: int, hard_val: int) -> tuple[int, bytes]:
+    arch = pwndbg.aglib.arch
+    rlim_infinity = infinity(arch.name, arch.ptrsize)
+    soft = rlim_infinity if soft_val == RLIM_INFINITY else soft_val
+    hard = rlim_infinity if hard_val == RLIM_INFINITY else hard_val
+    rlimit_data = arch.pack(soft) + arch.pack(hard)
+    stack_size = pwndbg.aglib.shellcode.stack_size_alignment(len(rlimit_data))
+
+    register_set = pwndbg.aglib.arch.reg_set
+    stack_reg = register_set.stack
+
+    asm = "".join(
+        [
+            shellcraft.pushstr(rlimit_data, False),
+            shellcraft.setrlimit(num, stack_reg),
+        ]
+    )
+
+    return stack_size, pwndbg.aglib.asm.asm(asm)
 
 
 @pwndbg.commands.Command(parser, category=CommandCategory.MISC)
+@pwndbg.commands.OnlyWhenRunning
 def setrlimit(resource: str, soft: str, hard: str | None = None) -> None:
     """
-    Sets a POSIX resource limit in the debugged process.
-
+    Sets a POSIX resource limit in the debugged process via the setrlimit syscall.
     Usage: setrlimit <resource> <soft> [hard]
     """
-    res = resource.lower()
-    if res not in LIMITS:
-        print(message.error(
-            f"Unknown resource '{resource}'. Valid: {', '.join(LIMITS)}"
-        ))
-        return
 
-    def to_int(val: str) -> int:
-        lv = val.lower()
-        if lv in ("infinite", "unlimited"):
-            return RLIM_INFINITY
-        try:
-            return int(val)
-        except ValueError:
-            print(message.error(f"Invalid limit '{val}'"))
-            raise
+    res = resource.lower()
 
     try:
-        soft_val = to_int(soft)
-        hard_val = to_int(hard) if hard is not None else soft_val
+        soft_val = to_int_limit(soft)
+        hard_val = to_int_limit(hard) if hard is not None else soft_val
     except ValueError:
         return
 
-    num = LIMITS[res]
-    try:
-        out = _invoke_setrlimit(num, soft_val, hard_val)
-        if out:
-            print(message.notice(out.strip()))
-        print(message.success(
-            f"Set {res} limit: soft={'∞' if soft_val==RLIM_INFINITY else soft_val}, "
-            f"hard={'∞' if hard_val==RLIM_INFINITY else hard_val}"
-        ))
-    except Exception as e:
-        print(message.error(f"setrlimit failed: {e}"))
+    retval_reg = pwndbg.aglib.arch.reg_set.retval
+    if retval_reg is None:
+        print(message.error("Return value register not defined for current architecture"))
+        return
+    if pwndbg.aglib.arch.syscall_abi is None:
+        print(message.error("Syscall ABI not defined for current architecture"))
+        return
+
+    num = resource_id(res, pwndbg.aglib.arch.name)
+
+    async def ctrl(ec: pwndbg.dbg_mod.ExecutionController) -> None:
+        soft_str = "inf" if soft_val == RLIM_INFINITY else str(soft_val)
+        hard_str = "inf" if hard_val == RLIM_INFINITY else str(hard_val)
+        print(
+            f"calling setrlimit for resource {res!r} (resource={num}): "
+            f"soft={soft_str}, hard={hard_str}"
+        )
+
+        stack_size, asm_bin = asm_setrlimit(num, soft_val, hard_val)
+
+        async with pwndbg.aglib.shellcode.exec_shellcode_with_stack(ec, asm_bin, stack_size):
+            ret = pwndbg.aglib.regs.read_reg(retval_reg)
+            print(
+                message.success(f"Set {res} limit (return={ret}): soft={soft_str}, hard={hard_str}")
+            )
+
+    pwndbg.dbg.selected_inferior().dispatch_execution_controller(ctrl)

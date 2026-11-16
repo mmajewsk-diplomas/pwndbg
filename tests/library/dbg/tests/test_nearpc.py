@@ -138,7 +138,7 @@ async def test_nearpc_opcode_bytes(ctrl: Controller, opcode_bytes: int) -> None:
         " ► 0x400094 {} <_start+20>    syscall <SYS_read>\n"
         "        fd:        0x1337\n"
         "        buf:       0xdeadbeef\n"
-        "        nbytes:    0\n"
+        "        count:     0\n"
         "   0x400096 {} <_start+22>    mov    eax, 0xa               EAX => 0xa\n"
         "   0x40009b {} <_start+27>    int    0x80 <SYS_unlink>\n"
         "   0x40009d {}                add    byte ptr [rax], al\n"
@@ -167,7 +167,7 @@ async def test_nearpc_opcode_seperator(ctrl: Controller, separator_bytes: int) -
         " ► 0x400094 {} <_start+20>    syscall <SYS_read>\n"
         "        fd:        0x1337\n"
         "        buf:       0xdeadbeef\n"
-        "        nbytes:    0\n"
+        "        count:     0\n"
         "   0x400096 {} <_start+22>    mov    eax, 0xa               EAX => 0xa\n"
         "   0x40009b {} <_start+27>    int    0x80 <SYS_unlink>\n"
         "   0x40009d {}                add    byte ptr [rax], al\n"
@@ -176,6 +176,102 @@ async def test_nearpc_opcode_seperator(ctrl: Controller, separator_bytes: int) -
         "   0x4000a3 {}                add    byte ptr [rax], al\n"
     ).format(*OPCODE_SEPERATOR_TESTS_EXPECTED_OUTPUT[separator_bytes])
     assert dis == excepted
+
+
+@pwndbg_test
+async def test_nearpc_opcode_flag(ctrl: Controller) -> None:
+    import pwndbg.aglib.memory
+
+    await ctrl.launch(SYSCALLS_BINARY)
+    await ctrl.execute("nextsyscall")
+
+    # The longest instruction shown is 5 bytes long
+    expected = (
+        "   0x400080 b8 00 00 00 00    <_start>       mov    eax, 0                 EAX => 0\n"
+        "   0x400085 bf 37 13 00 00    <_start+5>     mov    edi, 0x1337            EDI => 0x1337\n"
+        "   0x40008a be ef be ad de    <_start+10>    mov    esi, 0xdeadbeef        ESI => 0xdeadbeef\n"
+        "   0x40008f b9 10 00 00 00    <_start+15>    mov    ecx, 0x10              ECX => 0x10\n"
+        " ► 0x400094 0f 05             <_start+20>    syscall <SYS_read>\n"
+        "   0x400096 b8 0a 00 00 00    <_start+22>    mov    eax, 0xa               EAX => 0xa\n"
+        "   0x40009b cd 80             <_start+27>    int    0x80 <SYS_unlink>\n"
+        "   0x40009d 00 00                            add    byte ptr [rax], al\n"
+        "   0x40009f 00 00                            add    byte ptr [rax], al\n"
+        "   0x4000a1 00 00                            add    byte ptr [rax], al\n"
+        "   0x4000a3 00 00                            add    byte ptr [rax], al\n"
+        "   0x4000a5 00 00                            add    byte ptr [rax], al\n"
+        "   0x4000a7 00 00                            add    byte ptr [rax], al\n"
+        "   0x4000a9 00 00                            add    byte ptr [rax], al\n"
+    )
+    assert await ctrl.execute_and_capture("nearpc --opcode") == expected
+    assert await ctrl.execute_and_capture("nearpc -o") == expected
+
+    # A value of 0x100 or more given to -o is the address
+    assert await ctrl.execute_and_capture("nearpc -o $pc") == expected
+    assert await ctrl.execute_and_capture("nearpc -o $pc 1") == (
+        " ► 0x400094 0f 05    <_start+20>    syscall <SYS_read>\n"
+    )
+    assert await ctrl.execute_and_capture("nearpc -o 0x100") == "Invalid address 0x100\n"
+
+    # The flag does not change the nearpc-num-opcode-bytes setting
+    expected = (
+        "   0x400080 <_start>       mov    eax, 0                 EAX => 0\n"
+        "   0x400085 <_start+5>     mov    edi, 0x1337            EDI => 0x1337\n"
+        "   0x40008a <_start+10>    mov    esi, 0xdeadbeef        ESI => 0xdeadbeef\n"
+        "   0x40008f <_start+15>    mov    ecx, 0x10              ECX => 0x10\n"
+        " ► 0x400094 <_start+20>    syscall <SYS_read>\n"
+        "   0x400096 <_start+22>    mov    eax, 0xa               EAX => 0xa\n"
+        "   0x40009b <_start+27>    int    0x80 <SYS_unlink>\n"
+        "   0x40009d                add    byte ptr [rax], al\n"
+        "   0x40009f                add    byte ptr [rax], al\n"
+        "   0x4000a1                add    byte ptr [rax], al\n"
+        "   0x4000a3                add    byte ptr [rax], al\n"
+        "   0x4000a5                add    byte ptr [rax], al\n"
+        "   0x4000a7                add    byte ptr [rax], al\n"
+        "   0x4000a9                add    byte ptr [rax], al\n"
+    )
+    assert await ctrl.execute_and_capture("nearpc") == expected
+
+    # mov rax, 0xffffffffdeadbeef is 7 bytes long, so the column gets wider, and a smaller
+    # setting does not cut it
+    pwndbg.aglib.memory.write(0x40009D, bytes.fromhex("48c7c0efbeadde"))
+    await ctrl.execute("set nearpc-num-opcode-bytes 2")
+    expected = (
+        "   0x400080 b8 00 00 00 00          <_start>       mov    eax, 0                      EAX => 0\n"
+        "   0x400085 bf 37 13 00 00          <_start+5>     mov    edi, 0x1337                 EDI => 0x1337\n"
+        "   0x40008a be ef be ad de          <_start+10>    mov    esi, 0xdeadbeef             ESI => 0xdeadbeef\n"
+        "   0x40008f b9 10 00 00 00          <_start+15>    mov    ecx, 0x10                   ECX => 0x10\n"
+        " ► 0x400094 0f 05                   <_start+20>    syscall <SYS_read>\n"
+        "   0x400096 b8 0a 00 00 00          <_start+22>    mov    eax, 0xa                    EAX => 0xa\n"
+        "   0x40009b cd 80                   <_start+27>    int    0x80 <SYS_unlink>\n"
+        "   0x40009d 48 c7 c0 ef be ad de                   mov    rax, 0xffffffffdeadbeef     RAX => 0xffffffffdeadbeef\n"
+        "   0x4000a4 00 00                                  add    byte ptr [rax], al\n"
+        "   0x4000a6 00 00                                  add    byte ptr [rax], al\n"
+        "   0x4000a8 00 00                                  add    byte ptr [rax], al\n"
+        "   0x4000aa 00 00                                  add    byte ptr [rax], al\n"
+        "   0x4000ac 00 00                                  add    byte ptr [rax], al\n"
+        "   0x4000ae 00 00                                  add    byte ptr [rax], al\n"
+    )
+    assert await ctrl.execute_and_capture("nearpc -o") == expected
+
+    # With a number of bytes, the column has a fixed width and longer instructions are cut,
+    # as with the setting
+    expected = (
+        "   0x400080 b8 00 00 00\x1b[90m...\x1b[0m <_start>       mov    eax, 0                      EAX => 0\n"
+        "   0x400085 bf 37 13 00\x1b[90m...\x1b[0m <_start+5>     mov    edi, 0x1337                 EDI => 0x1337\n"
+        "   0x40008a be ef be ad\x1b[90m...\x1b[0m <_start+10>    mov    esi, 0xdeadbeef             ESI => 0xdeadbeef\n"
+        "   0x40008f b9 10 00 00\x1b[90m...\x1b[0m <_start+15>    mov    ecx, 0x10                   ECX => 0x10\n"
+        " ► 0x400094 0f 05          <_start+20>    syscall <SYS_read>\n"
+        "   0x400096 b8 0a 00 00\x1b[90m...\x1b[0m <_start+22>    mov    eax, 0xa                    EAX => 0xa\n"
+        "   0x40009b cd 80          <_start+27>    int    0x80 <SYS_unlink>\n"
+        "   0x40009d 48 c7 c0 ef\x1b[90m...\x1b[0m                mov    rax, 0xffffffffdeadbeef     RAX => 0xffffffffdeadbeef\n"
+        "   0x4000a4 00 00                         add    byte ptr [rax], al\n"
+        "   0x4000a6 00 00                         add    byte ptr [rax], al\n"
+        "   0x4000a8 00 00                         add    byte ptr [rax], al\n"
+        "   0x4000aa 00 00                         add    byte ptr [rax], al\n"
+        "   0x4000ac 00 00                         add    byte ptr [rax], al\n"
+        "   0x4000ae 00 00                         add    byte ptr [rax], al\n"
+    )
+    assert await ctrl.execute_and_capture("nearpc -o 4") == expected
 
 
 @pwndbg_test
@@ -349,10 +445,10 @@ async def test_nearpc_function(ctrl: Controller) -> None:
     # disassemble current function
     dis = await ctrl.execute_and_capture("nearpc --function")
     expected_break_here = (
-        "b+ 0x10014d0 <break_here>      push   rbp\n"
-        " ► 0x10014d1 <break_here+1>    mov    rbp, rsp\n"
-        "   0x10014d4 <break_here+4>    pop    rbp\n"
-        "   0x10014d5 <break_here+5>    ret   \n"
+        "b+ 0x1001530 <break_here>      push   rbp\n"
+        " ► 0x1001531 <break_here+1>    mov    rbp, rsp\n"
+        "   0x1001534 <break_here+4>    pop    rbp\n"
+        "   0x1001535 <break_here+5>    ret   \n"
     )
     assert dis == expected_break_here
 
@@ -360,10 +456,10 @@ async def test_nearpc_function(ctrl: Controller) -> None:
     await ctrl.execute("up")
     dis = (await ctrl.execute_and_capture("nearpc --function")).splitlines()[-4:]
     expected = [
-        " ► 0x1001502 <main+34>    xor    eax, eax",
-        "   0x1001504 <main+36>    add    rsp, 0x10",
-        "   0x1001508 <main+40>    pop    rbp",
-        "   0x1001509 <main+41>    ret   ",
+        " ► 0x1001562 <main+34>    xor    eax, eax",
+        "   0x1001564 <main+36>    add    rsp, 0x10",
+        "   0x1001568 <main+40>    pop    rbp",
+        "   0x1001569 <main+41>    ret   ",
     ]
     assert dis == expected
 
@@ -430,34 +526,34 @@ async def test_nearpc_plt_jumps_lazy_binding_x86_64(
             pytest.mark.xfail(reason="LLDB does not correctly find the symbol names", strict=True)
         )
 
-    PLT_ADDRESS = 0x555555555670
+    PLT_ADDRESS = 0x5555555556A0
     dis_0 = await ctrl.execute_and_capture(f"nearpc {PLT_ADDRESS} -r 0 -t 15")
     dis_0 = pwndbg.color.strip(dis_0)
 
     expected_0 = (
-        " ► 0x555555555670                                ┌┌┌┌─>   push   qword ptr [rip + 0x11b2]\n"
-        "   0x555555555676                                ╎╎╎╎     jmp    qword ptr [rip + 0x11b4]    <[0x555555556830], now=_dl_runtime_resolve_xsavec>\n"
+        " ► 0x5555555556a0                                ┌┌┌┌─>   push   qword ptr [rip + 0x11a2]\n"
+        "   0x5555555556a6                                ╎╎╎╎     jmp    qword ptr [rip + 0x11a4]    <[0x555555556850], now=_dl_runtime_resolve_xsavec>\n"
         "                                                 ╎╎╎╎  \n"
-        "   0x55555555567c                                ╎╎╎╎     nop    dword ptr [rax]\n"
-        "   0x555555555680 <puts@plt>                     ╎╎╎╎┌<   jmp    qword ptr [rip + 0x11b2]    <[puts@got[plt]], now=puts@plt+6>\n"
+        "   0x5555555556ac                                ╎╎╎╎     nop    dword ptr [rax]\n"
+        "   0x5555555556b0 <puts@plt>                     ╎╎╎╎┌<   jmp    qword ptr [rip + 0x11a2]    <[puts@got[plt]], now=puts@plt+6>\n"
         "                                                 ╎╎╎╎│ \n"
-        "   0x555555555686 <puts@plt+6>                   ╎╎╎╎└>   push   0\n"
-        "   0x55555555568b <puts@plt+11>                  ╎╎╎└─<   jmp    0x555555555670              <0x555555555670>\n"
+        "   0x5555555556b6 <puts@plt+6>                   ╎╎╎╎└>   push   0\n"
+        "   0x5555555556bb <puts@plt+11>                  ╎╎╎└─<   jmp    0x5555555556a0              <0x5555555556a0>\n"
         "                                                 ╎╎╎   \n"
-        "   0x555555555690 <printf@plt>                   ╎╎╎ ┌<   jmp    qword ptr [rip + 0x11aa]    <[printf@got[plt]], now=printf@plt+6>\n"
+        "   0x5555555556c0 <printf@plt>                   ╎╎╎ ┌<   jmp    qword ptr [rip + 0x119a]    <[printf@got[plt]], now=printf@plt+6>\n"
         "                                                 ╎╎╎ │ \n"
-        "   0x555555555696 <printf@plt+6>                 ╎╎╎ └>   push   1\n"
-        "   0x55555555569b <printf@plt+11>                ╎╎└──<   jmp    0x555555555670              <0x555555555670>\n"
+        "   0x5555555556c6 <printf@plt+6>                 ╎╎╎ └>   push   1\n"
+        "   0x5555555556cb <printf@plt+11>                ╎╎└──<   jmp    0x5555555556a0              <0x5555555556a0>\n"
         "                                                 ╎╎    \n"
-        "   0x5555555556a0 <write@plt>                    ╎╎  ┌<   jmp    qword ptr [rip + 0x11a2]    <[write@got[plt]], now=write@plt+6>\n"
+        "   0x5555555556d0 <write@plt>                    ╎╎  ┌<   jmp    qword ptr [rip + 0x1192]    <[write@got[plt]], now=write@plt+6>\n"
         "                                                 ╎╎  │ \n"
-        "   0x5555555556a6 <write@plt+6>                  ╎╎  └>   push   2\n"
-        "   0x5555555556ab <write@plt+11>                 ╎└───<   jmp    0x555555555670              <0x555555555670>\n"
+        "   0x5555555556d6 <write@plt+6>                  ╎╎  └>   push   2\n"
+        "   0x5555555556db <write@plt+11>                 ╎└───<   jmp    0x5555555556a0              <0x5555555556a0>\n"
         "                                                 ╎     \n"
-        "   0x5555555556b0 <srand@plt>                    ╎   ┌<   jmp    qword ptr [rip + 0x119a]    <[srand@got[plt]], now=srand@plt+6>\n"
+        "   0x5555555556e0 <srand@plt>                    ╎   ┌<   jmp    qword ptr [rip + 0x118a]    <[srand@got[plt]], now=srand@plt+6>\n"
         "                                                 ╎   │ \n"
-        "   0x5555555556b6 <srand@plt+6>                  ╎   └>   push   3\n"
-        "   0x5555555556bb <srand@plt+11>                 └────<   jmp    0x555555555670              <0x555555555670>\n"
+        "   0x5555555556e6 <srand@plt+6>                  ╎   └>   push   3\n"
+        "   0x5555555556eb <srand@plt+11>                 └────<   jmp    0x5555555556a0              <0x5555555556a0>\n"
     )
 
     assert dis_0 == expected_0
@@ -470,29 +566,29 @@ async def test_nearpc_plt_jumps_lazy_binding_x86_64(
 
     # At this point, some of the symbols have been resolved
     expected_1 = (
-        " ► 0x555555555670                                 ┌┌┌┌>   push   qword ptr [rip + 0x11b2]\n"
-        "   0x555555555676                                 ╎╎╎╎    jmp    qword ptr [rip + 0x11b4]    <[0x555555556830], now=_dl_runtime_resolve_xsavec>\n"
+        " ► 0x5555555556a0                                 ┌┌┌┌>   push   qword ptr [rip + 0x11a2]\n"
+        "   0x5555555556a6                                 ╎╎╎╎    jmp    qword ptr [rip + 0x11a4]    <[0x555555556850], now=_dl_runtime_resolve_xsavec>\n"
         "                                                  ╎╎╎╎ \n"
-        "   0x55555555567c                                 ╎╎╎╎    nop    dword ptr [rax]\n"
-        "   0x555555555680 <puts@plt>                      ╎╎╎╎    jmp    qword ptr [rip + 0x11b2]    <[puts@got[plt]], now=puts>\n"
+        "   0x5555555556ac                                 ╎╎╎╎    nop    dword ptr [rax]\n"
+        "   0x5555555556b0 <puts@plt>                      ╎╎╎╎    jmp    qword ptr [rip + 0x11a2]    <[puts@got[plt]], now=puts>\n"
         "                                                  ╎╎╎╎ \n"
-        "   0x555555555686 <puts@plt+6>                    ╎╎╎╎    push   0\n"
-        "   0x55555555568b <puts@plt+11>                   ╎╎╎└<   jmp    0x555555555670              <0x555555555670>\n"
+        "   0x5555555556b6 <puts@plt+6>                    ╎╎╎╎    push   0\n"
+        "   0x5555555556bb <puts@plt+11>                   ╎╎╎└<   jmp    0x5555555556a0              <0x5555555556a0>\n"
         "                                                  ╎╎╎  \n"
-        "   0x555555555690 <printf@plt>                    ╎╎╎     jmp    qword ptr [rip + 0x11aa]    <[printf@got[plt]], now=printf>\n"
+        "   0x5555555556c0 <printf@plt>                    ╎╎╎     jmp    qword ptr [rip + 0x119a]    <[printf@got[plt]], now=printf>\n"
         "                                                  ╎╎╎  \n"
-        "   0x555555555696 <printf@plt+6>                  ╎╎╎     push   1\n"
-        "   0x55555555569b <printf@plt+11>                 ╎╎└─<   jmp    0x555555555670              <0x555555555670>\n"
+        "   0x5555555556c6 <printf@plt+6>                  ╎╎╎     push   1\n"
+        "   0x5555555556cb <printf@plt+11>                 ╎╎└─<   jmp    0x5555555556a0              <0x5555555556a0>\n"
         "                                                  ╎╎   \n"
-        "   0x5555555556a0 <write@plt>                     ╎╎ ┌<   jmp    qword ptr [rip + 0x11a2]    <[write@got[plt]], now=write@plt+6>\n"
+        "   0x5555555556d0 <write@plt>                     ╎╎ ┌<   jmp    qword ptr [rip + 0x1192]    <[write@got[plt]], now=write@plt+6>\n"
         "                                                  ╎╎ │ \n"
-        "   0x5555555556a6 <write@plt+6>                   ╎╎ └>   push   2\n"
-        "   0x5555555556ab <write@plt+11>                  ╎└──<   jmp    0x555555555670              <0x555555555670>\n"
+        "   0x5555555556d6 <write@plt+6>                   ╎╎ └>   push   2\n"
+        "   0x5555555556db <write@plt+11>                  ╎└──<   jmp    0x5555555556a0              <0x5555555556a0>\n"
         "                                                  ╎    \n"
-        "   0x5555555556b0 <srand@plt>                     ╎  ┌<   jmp    qword ptr [rip + 0x119a]    <[srand@got[plt]], now=srand@plt+6>\n"
+        "   0x5555555556e0 <srand@plt>                     ╎  ┌<   jmp    qword ptr [rip + 0x118a]    <[srand@got[plt]], now=srand@plt+6>\n"
         "                                                  ╎  │ \n"
-        "   0x5555555556b6 <srand@plt+6>                   ╎  └>   push   3\n"
-        "   0x5555555556bb <srand@plt+11>                  └───<   jmp    0x555555555670              <0x555555555670>\n"
+        "   0x5555555556e6 <srand@plt+6>                   ╎  └>   push   3\n"
+        "   0x5555555556eb <srand@plt+11>                  └───<   jmp    0x5555555556a0              <0x5555555556a0>\n"
     )
 
     assert dis_1 == expected_1
@@ -518,42 +614,42 @@ async def test_nearpc_plt_jumps_lazy_binding_i386(
             pytest.mark.xfail(reason="LLDB does not correctly find the symbol names", strict=True)
         )
 
-    PLT_ADDRESS = 0x11520
+    PLT_ADDRESS = 0x11490
     dis = await ctrl.execute_and_capture(f"nearpc {PLT_ADDRESS} -r 0 -t 21")
     dis = pwndbg.color.strip(dis)
 
     expected = (
-        " ► 0x11520                                           ┌┌┌┌┌>   push   dword ptr [_GLOBAL_OFFSET_TABLE_+4]\n"
-        "   0x11526                                           ╎╎╎╎╎    jmp    dword ptr [_GLOBAL_OFFSET_TABLE_+8] <[_GLOBAL_OFFSET_TABLE_+8], now=_dl_runtime_resolve>\n"
+        " ► 0x11490                                           ┌┌┌┌┌>   push   dword ptr [_GLOBAL_OFFSET_TABLE_+4]\n"
+        "   0x11496                                           ╎╎╎╎╎    jmp    dword ptr [_GLOBAL_OFFSET_TABLE_+8] <[_GLOBAL_OFFSET_TABLE_+8], now=_dl_runtime_resolve>\n"
         "                                                     ╎╎╎╎╎ \n"
-        "   0x1152c                                           ╎╎╎╎╎    nop   \n"
-        "   0x1152d                                           ╎╎╎╎╎    nop   \n"
-        "   0x1152e                                           ╎╎╎╎╎    nop   \n"
-        "   0x1152f                                           ╎╎╎╎╎    nop   \n"
-        "   0x11530 <__libc_start_main@plt>                   ╎╎╎╎╎    jmp    dword ptr [__libc_start_main@got.plt] <[__libc_start_main@got.plt], now=__libc_start_main>\n"
+        "   0x1149c                                           ╎╎╎╎╎    nop   \n"
+        "   0x1149d                                           ╎╎╎╎╎    nop   \n"
+        "   0x1149e                                           ╎╎╎╎╎    nop   \n"
+        "   0x1149f                                           ╎╎╎╎╎    nop   \n"
+        "   0x114a0 <__libc_start_main@plt>                   ╎╎╎╎╎    jmp    dword ptr [__libc_start_main@got.plt] <[__libc_start_main@got.plt], now=__libc_start_main>\n"
         "                                                     ╎╎╎╎╎ \n"
-        "   0x11536 <__libc_start_main@plt+6>                 ╎╎╎╎╎    push   0\n"
-        "   0x1153b <__libc_start_main@plt+11>                ╎╎╎╎└<   jmp    0x11520                     <0x11520>\n"
+        "   0x114a6 <__libc_start_main@plt+6>                 ╎╎╎╎╎    push   0\n"
+        "   0x114ab <__libc_start_main@plt+11>                ╎╎╎╎└<   jmp    0x11490                     <0x11490>\n"
         "                                                     ╎╎╎╎  \n"
-        "   0x11540 <puts@plt>                                ╎╎╎╎┌<   jmp    dword ptr [puts@got[plt]]   <[puts@got[plt]], now=puts@plt+6>\n"
+        "   0x114b0 <puts@plt>                                ╎╎╎╎┌<   jmp    dword ptr [puts@got[plt]]   <[puts@got[plt]], now=puts@plt+6>\n"
         "                                                     ╎╎╎╎│ \n"
-        "   0x11546 <puts@plt+6>                              ╎╎╎╎└>   push   8\n"
-        "   0x1154b <puts@plt+11>                             ╎╎╎└─<   jmp    0x11520                     <0x11520>\n"
+        "   0x114b6 <puts@plt+6>                              ╎╎╎╎└>   push   8\n"
+        "   0x114bb <puts@plt+11>                             ╎╎╎└─<   jmp    0x11490                     <0x11490>\n"
         "                                                     ╎╎╎   \n"
-        "   0x11550 <printf@plt>                              ╎╎╎ ┌<   jmp    dword ptr [printf@got[plt]] <[printf@got[plt]], now=printf@plt+6>\n"
+        "   0x114c0 <printf@plt>                              ╎╎╎ ┌<   jmp    dword ptr [printf@got[plt]] <[printf@got[plt]], now=printf@plt+6>\n"
         "                                                     ╎╎╎ │ \n"
-        "   0x11556 <printf@plt+6>                            ╎╎╎ └>   push   0x10\n"
-        "   0x1155b <printf@plt+11>                           ╎╎└──<   jmp    0x11520                     <0x11520>\n"
+        "   0x114c6 <printf@plt+6>                            ╎╎╎ └>   push   0x10\n"
+        "   0x114cb <printf@plt+11>                           ╎╎└──<   jmp    0x11490                     <0x11490>\n"
         "                                                     ╎╎    \n"
-        "   0x11560 <write@plt>                               ╎╎  ┌<   jmp    dword ptr [write@got[plt]]  <[write@got[plt]], now=write@plt+6>\n"
+        "   0x114d0 <write@plt>                               ╎╎  ┌<   jmp    dword ptr [write@got[plt]]  <[write@got[plt]], now=write@plt+6>\n"
         "                                                     ╎╎  │ \n"
-        "   0x11566 <write@plt+6>                             ╎╎  └>   push   0x18\n"
-        "   0x1156b <write@plt+11>                            ╎└───<   jmp    0x11520                     <0x11520>\n"
+        "   0x114d6 <write@plt+6>                             ╎╎  └>   push   0x18\n"
+        "   0x114db <write@plt+11>                            ╎└───<   jmp    0x11490                     <0x11490>\n"
         "                                                     ╎     \n"
-        "   0x11570 <srand@plt>                               ╎   ┌<   jmp    dword ptr [srand@got[plt]]  <[srand@got[plt]], now=srand@plt+6>\n"
+        "   0x114e0 <srand@plt>                               ╎   ┌<   jmp    dword ptr [srand@got[plt]]  <[srand@got[plt]], now=srand@plt+6>\n"
         "                                                     ╎   │ \n"
-        "   0x11576 <srand@plt+6>                             ╎   └>   push   0x20\n"
-        "   0x1157b <srand@plt+11>                            └────<   jmp    0x11520                     <0x11520>\n"
+        "   0x114e6 <srand@plt+6>                             ╎   └>   push   0x20\n"
+        "   0x114eb <srand@plt+11>                            └────<   jmp    0x11490                     <0x11490>\n"
     )
 
     # In some platforms (Fedora), it uses the `_impl` symbol instead.
