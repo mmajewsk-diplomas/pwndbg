@@ -42,6 +42,7 @@ PWNDBG_SUPPORTED_ARCHITECTURES_TYPE = Literal[
     "loongarch64",
     "s390x",
     "hexagon",
+    "m68k",
 ]
 
 PWNDBG_SUPPORTED_ARCHITECTURES: list[PWNDBG_SUPPORTED_ARCHITECTURES_TYPE] = list(
@@ -123,3 +124,6 @@ class ArchDefinition:
     endian: Literal["little", "big"]
     platform: Platform
     attributes: list[ArchAttribute] = field(default_factory=list)
+
+    def __hash__(self) -> int:
+        return hash((self.name, self.ptrsize, self.endian, self.platform, tuple(self.attributes)))

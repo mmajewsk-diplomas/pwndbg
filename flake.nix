@@ -12,6 +12,8 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    # nixpkgs dropped x86_64-darwin in 26.11, keep building it from the last release supporting it
+    nixpkgs-x86_64-darwin.url = "github:NixOS/nixpkgs/nixpkgs-26.05-darwin";
 
     pyproject-nix = {
       url = "github:pyproject-nix/pyproject.nix";
@@ -40,7 +42,11 @@
     }:
     let
       # Self contained packages for: Debian, RHEL-like (yum, rpm), Alpine, Arch packages
-      forAllSystems = nixpkgs.lib.genAttrs nixpkgs.lib.systems.flakeExposed;
+      forAllSystems = nixpkgs.lib.genAttrs (
+        nixpkgs.lib.unique (nixpkgs.lib.systems.flakeExposed ++ [ "x86_64-darwin" ])
+      );
+      nixpkgsForSystem =
+        system: if system == "x86_64-darwin" then inputs.nixpkgs-x86_64-darwin else nixpkgs;
       forPortables = nixpkgs.lib.genAttrs [
         "deb"
         "rpm"
@@ -69,7 +75,7 @@
 
       overlayDarwin =
         final: prev:
-        nixpkgs.lib.optionalAttrs prev.stdenv.isDarwin {
+        nixpkgs.lib.optionalAttrs prev.stdenv.hostPlatform.isDarwin {
           # Internally, apple-libffi uses dlopen() to load "/nix/store/<libffi-name>/lib/libffi-trampoline.dylib".
           # However, to ensure a "portable" build, we want to avoid hardcoded /nix/store paths in binaries.
           #
@@ -82,7 +88,7 @@
         };
       pkgsBySystem = forAllSystems (
         system:
-        import nixpkgs {
+        import (nixpkgsForSystem system) {
           inherit system;
           overlays = [
             (final: prev: {
@@ -108,7 +114,7 @@
         };
       portableDrvs =
         system:
-        nixpkgs.lib.optionalAttrs pkgsBySystem.${system}.stdenv.isLinux (
+        nixpkgs.lib.optionalAttrs pkgsBySystem.${system}.stdenv.hostPlatform.isLinux (
           mapKeysWithName (name: "pwndbg-gdb-portable-${name}") (
             forPortables (
               packager:
@@ -186,7 +192,7 @@
         });
       crossDrvs =
         system:
-        nixpkgs.lib.optionalAttrs pkgsBySystem.${system}.stdenv.isLinux (
+        nixpkgs.lib.optionalAttrs pkgsBySystem.${system}.stdenv.hostPlatform.isLinux (
           (nixpkgs.lib.attrsets.mapAttrs' (cross: value: {
             name = "pwndbg-gdb-cross-${cross}-tarball";
             value = tarballCrossDrv system cross { groups = [ "gdb" ]; };

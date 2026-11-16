@@ -27,6 +27,7 @@ import pwndbg.dbg_mod
 import pwndbg.gdblib
 import pwndbg.gdblib.events
 import pwndbg.lib.cache
+import pwndbg.lib.lexer
 import pwndbg.lib.memory
 import pwndbg.lib.path
 from pwndbg.color import message
@@ -70,6 +71,7 @@ gdb_architecture_name_fixup_list = (
     "riscv",
     "loongarch64",
     "s390:64-bit",
+    "m68k",
 )
 
 # `show architecture` returns a string like "mips:isa32r5"
@@ -1014,7 +1016,7 @@ class GDBProcess(pwndbg.dbg_mod.Process):
 
     @override
     def symbol_name_at_address(self, address: int) -> str | None:
-        from pwndbg.dbg_mod.gdb.symbol import resolve_addr
+        from .symbol import resolve_addr
 
         return resolve_addr(address) or None
 
@@ -1051,7 +1053,6 @@ class GDBProcess(pwndbg.dbg_mod.Process):
 
     @override
     def get_function_boundaries(self, address: int) -> tuple[int, int] | None:
-
         # While GDB internally has multiple ways of determine function boundaries in the absence
         # of debugging symbols (using symbol sizes if available, then falling back to using the order symbols in memory to determine boundaries)
         # These methods are internally used to determine the these methods are not exposed to the Python API
@@ -1084,19 +1085,15 @@ class GDBProcess(pwndbg.dbg_mod.Process):
         import pwndbg.aglib.typeinfo
 
         ptrsize = pwndbg.aglib.typeinfo.ptrsize
-        not_exactly_arch = False
 
-        endian: Literal["little", "big"] = None
+        endian: Literal["little", "big"] = "big"
         if "little" in gdb.execute("show endian", to_string=True).lower():
             endian = "little"
-        else:
-            endian = "big"
 
         if pwndbg.aglib.proc.alive():
             arch = gdb.newest_frame().architecture().name()
         else:
             arch = gdb.execute("show architecture", to_string=True).strip()
-            not_exactly_arch = True
 
         arch = arch.lower()
 
@@ -1147,9 +1144,6 @@ class GDBProcess(pwndbg.dbg_mod.Process):
                     platform=Platform.LINUX,
                     attributes=arch_attributes,
                 )
-
-        if not_exactly_arch:
-            raise RuntimeError(f"Could not deduce architecture from: {arch}")
 
         return ArchDefinition(
             name=arch,  # type: ignore[arg-type]
@@ -1657,6 +1651,19 @@ class GDBValue(pwndbg.dbg_mod.Value):
             raise pwndbg.dbg_mod.DebuggerError(e)
 
     @override
+    def raw_bytes(self) -> bytes:
+        # gdb.Value.bytes was added in GDB 15.1
+        if not hasattr(self.inner, "bytes"):
+            raise pwndbg.dbg_mod.DebuggerError(
+                "reading raw bytes not support on current GDB version"
+            )
+
+        try:
+            return bytes(self.inner.bytes)
+        except gdb.error as e:
+            raise pwndbg.dbg_mod.DebuggerError(e)
+
+    @override
     def cast(self, type: pwndbg.dbg_mod.Type | Any) -> pwndbg.dbg_mod.Value:
         assert isinstance(type, GDBType)
         type: GDBType = type
@@ -1865,7 +1872,17 @@ class GDB(pwndbg.dbg_mod.Debugger):
 
         config_mod.init_params()
 
+        from pwndbginit import is_reloading
+
+        if is_reloading():
+            return
+
         from pwndbg.dbg_mod.gdb import debug_sym as debug_sym
+
+        # Set a variable, "$pwndbg_plugin_enabled", that a .gdbinit config can use to detect
+        # that pwndbg is enabled with `if ! $_isvoid($pwndbg_plugin_enabled)`
+        # This allows the .gdbinit to conditionally configure pwndbg settings
+        gdb.set_convenience_variable("pwndbg_plugin_enabled", True)
 
         self._load_gdbinit()
 
@@ -2001,7 +2018,7 @@ class GDB(pwndbg.dbg_mod.Debugger):
 
     @override
     def lex_args(self, command_line: str) -> list[str]:
-        return gdb.string_to_argv(command_line)
+        return pwndbg.lib.lexer.lex_debugger_command(command_line)
 
     @override
     def selected_thread(self) -> pwndbg.dbg_mod.Thread | None:
@@ -2138,15 +2155,6 @@ class GDB(pwndbg.dbg_mod.Debugger):
 
         literal: Literal["att", "intel"] = flavor
         return literal
-
-    @override
-    def string_limit(self) -> int:
-        message = gdb.execute("show print elements", from_tty=False, to_string=True)
-        message = message.split("\n")[0].split()[-1]
-        message = message.strip(".")
-        if message == "unlimited":
-            return 0
-        return int(message)
 
     @override
     def addrsz(self, address: Any) -> str:
