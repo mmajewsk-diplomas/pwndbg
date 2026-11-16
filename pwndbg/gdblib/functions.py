@@ -19,6 +19,8 @@ import pwndbg.aglib.proc
 import pwndbg.aglib.qemu
 import pwndbg.aglib.vmmap
 import pwndbg.dbg_mod
+import pwndbg.wrappers.checksec
+import pwndbg.wrappers.readelf
 from pwndbg.lib.common import hex2ptr_common
 
 functions: list[_GdbFunction] = []
@@ -135,6 +137,150 @@ def base(name_pattern: gdb.Value | str):
             return p.vaddr
 
     raise gdb.GdbError(f"$base error: No mapping named '{name}'")
+
+
+@GdbFunction(only_when_running=True)
+def heap(offset: gdb.Value = gdb.Value(0)) -> int:
+    """
+    Return the base address of the heap mapping, optional offset allowed.
+
+    Example:
+    ```
+    pwndbg> vmmap
+    0x555555554000     0x555555555000 r--p     1000       0 p1
+    0x555555555000     0x555555556000 r-xp     1000    1000 p1
+    0x555555556000     0x555555557000 r--p     1000    2000 p1
+    0x555555557000     0x555555558000 r--p     1000    2000 p1
+    0x555555558000     0x555555559000 rw-p     1000    3000 p1
+    0x555555559000     0x55555557a000 rw-p    21000       0 [heap]
+    [...]
+    pwndbg> p/x $heap()
+    $1 = 0x555555559000
+    pwndbg> p/x $heap(0x10)
+    $2 = 0x555555559010
+    pwndbg> x/32bx $heap()
+    0x555555559000:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+    0x555555559008:	0x91	0x02	0x00	0x00	0x00	0x00	0x00	0x00
+    0x555555559010:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+    0x555555559018:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+    ```
+    """
+    heap_base = next((p.vaddr for p in pwndbg.aglib.vmmap.get() if p.objfile == "[heap]"), None)
+
+    if heap_base is None:
+        raise gdb.GdbError("$heap error: heap mapping not found.")
+
+    return heap_base + int(offset)
+
+
+@GdbFunction(only_when_running=True)
+def stack(offset: gdb.Value = gdb.Value(0)) -> int:
+    """
+    Return the base address of the stack mapping, optional offset allowed.
+
+    Example:
+    ```
+    pwndbg> vmmap
+    [...]
+    0x7ffff7fc5000     0x7ffff7fc6000 r--p     1000       0 /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+    0x7ffff7fc6000     0x7ffff7ff1000 r-xp    2b000    1000 /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+    0x7ffff7ff1000     0x7ffff7ffb000 r--p     a000   2c000 /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+    0x7ffff7ffb000     0x7ffff7ffd000 r--p     2000   36000 /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+    0x7ffff7ffd000     0x7ffff7fff000 rw-p     2000   38000 /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+    0x7ffffffde000     0x7ffffffff000 rw-p    21000       0 [stack]
+    [...]
+    pwndbg> p/x $stack()
+    $1 = 0x7ffffffde000
+    pwndbg> p/x $stack(0x10)
+    $2 = 0x7ffffffde010
+    pwndbg> x/gx $stack()
+    0x7ffffffde000:	0x0000000000000000
+    ```
+    """
+    stack_base = next((p.vaddr for p in pwndbg.aglib.vmmap.get() if p.objfile == "[stack]"), None)
+
+    if stack_base is None:
+        raise gdb.GdbError("$stack error: stack mapping not found.")
+
+    return stack_base + int(offset)
+
+
+@GdbFunction(only_when_running=True)
+def bss(offset: gdb.Value = gdb.Value(0)) -> int:
+    """
+    Return the address of the program's BSS start. Optional offset allowed.
+
+    Example:
+    ```
+    pwndbg> elf
+    0x555555558010     0x555555558020      RW-       0x10  .bss
+    pwndbg> p/x $bss()
+    $1 = 0x555555558010
+    pwndbg> p/x $bss(0x4)
+    $2 = 0x555555558014
+    ```
+    """
+
+    path = pwndbg.aglib.proc.exe()
+    section = pwndbg.aglib.elf.section_by_name(path, ".bss", try_local_path=True)
+    if section is None:
+        raise gdb.GdbError("$bss error: could not find the .bss section.")
+
+    bss_base, _, _ = section
+
+    local_path = pwndbg.aglib.file.get_file(path, try_local_path=True)
+    pie_status = pwndbg.wrappers.checksec.pie_status(local_path)
+    if "PIE enabled" in pie_status:
+        bss_base += pwndbg.aglib.proc.binary_base_addr()
+
+    return bss_base + int(offset)
+
+
+def _main_executable_got_base() -> int | None:
+    path = pwndbg.aglib.proc.exe()
+    local_path = pwndbg.aglib.file.get_file(path, try_local_path=True)
+    pie_status = pwndbg.wrappers.checksec.pie_status(local_path)
+    got_entries = pwndbg.wrappers.readelf.get_got_entry(local_path)
+
+    bin_base_offset = pwndbg.aglib.proc.binary_base_addr() if "PIE enabled" in pie_status else 0
+
+    addresses: list[int] = []
+
+    for _, lines in got_entries.items():
+        for line in lines:
+            parts = line.split()
+            if not parts:
+                continue
+
+            offset = parts[0]
+            address = int(offset, 16) + bin_base_offset
+            addresses.append(address)
+
+    if not addresses:
+        return None
+
+    return min(addresses)
+
+
+@GdbFunction(only_when_running=True)
+def got(offset: gdb.Value = gdb.Value(0)) -> int:
+    """
+    Return the address of the Global Offset Table (GOT), optional offset allowed.
+
+    Example:
+    ```
+    pwndbg> p/x $got()
+    $1 = 0x555555557fc0
+    pwndbg> p/x $got(0x8)
+    $2 = 0x555555557fc8
+    ```
+    """
+
+    got_base = _main_executable_got_base()
+    if got_base is None:
+        raise gdb.GdbError("$got error: could not determine the main executable GOT address.")
+
+    return got_base + int(offset)
 
 
 @GdbFunction()
