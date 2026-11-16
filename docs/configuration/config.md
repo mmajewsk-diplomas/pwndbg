@@ -49,7 +49,7 @@ The name of the large language model to query.
 
 Changing this affects the behavior, response quality, and cost (if applicable) of AI responses.
 
-**Default:** 'gpt-3.5-turbo'  
+**Default:** 'gpt-4o-mini'  
 
 ----------
 
@@ -607,17 +607,6 @@ Print a full stacktrace for exceptions raised in Pwndbg commands.
 
 ----------
 
-## **gcc-compiler-path**
-
-
-Path to the gcc/g++ toolchain for generating imported symbols.
-
-
-
-**Default:** ''  
-
-----------
-
 ## **gdb-workaround-stop-event**
 <small style="color: lightgray;">(only in GDB)</small>
 
@@ -928,7 +917,10 @@ Maximum allowed depth for a type in an Objective-C method call.
 
      The strategy to resolve heap via heuristic.
 
-    Values explained:
+    *Note: this option has been deprecated - the heap implementation now always attempts
+    to use symbols whenever possible, using heuristics as a fallback.*
+
+    Old values explained:
 
     + `auto` - Pwndbg will try to use heuristics if debug symbols are missing
     + `force` - Pwndbg will always try to use heuristics, even if debug symbols are available
@@ -979,7 +971,10 @@ Maximum allowed depth for a type in an Objective-C method call.
 
      The strategy to resolve heap via heuristic.
 
-    Values explained:
+    *Note: this option has been deprecated - the heap implementation now always attempts
+    to use symbols whenever possible, using heuristics as a fallback.*
+
+    Old values explained:
 
     + `auto` - Pwndbg will try to use heuristics if debug symbols are missing
     + `force` - Pwndbg will always try to use heuristics, even if debug symbols are available

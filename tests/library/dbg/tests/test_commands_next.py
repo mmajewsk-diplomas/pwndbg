@@ -38,7 +38,9 @@ async def test_command_nextproginstr(ctrl: Controller) -> None:
     exec_bin_pages = [
         p for p in pwndbg.aglib.vmmap.get() if p.objfile == pwndbg.aglib.proc.exe() and p.execute
     ]
-    assert any(pwndbg.aglib.regs.pc in p for p in exec_bin_pages)
+    pc = pwndbg.aglib.regs.pc
+    assert pc is not None
+    assert any(pc in p for p in exec_bin_pages)
     main_page = pwndbg.aglib.vmmap.find(pwndbg.aglib.regs.pc)
 
     break_at_sym("puts")
@@ -49,7 +51,9 @@ async def test_command_nextproginstr(ctrl: Controller) -> None:
 
     # Execute nextproginstr and see if we came back to the same vmmap page
     await ctrl.execute("nextproginstr")
-    assert pwndbg.aglib.regs.pc in main_page
+    pc = pwndbg.aglib.regs.pc
+    assert pc is not None and main_page is not None
+    assert pc in main_page
 
     # Ensure that nextproginstr won't jump now
     out = await ctrl.execute_and_capture("nextproginstr")
@@ -72,13 +76,16 @@ async def test_command_nextproginstr_at_ret(ctrl: Controller) -> None:
     await ctrl.cont()
 
     # Sanity check that we are in libc
-    assert "libc" in pwndbg.aglib.vmmap.find(pwndbg.aglib.regs.pc).objfile
+    foundpage = pwndbg.aglib.vmmap.find(pwndbg.aglib.regs.pc)
+    assert foundpage is not None and "libc" in foundpage.objfile
 
     await ctrl.execute("nextret")
 
     # Execute nextproginstr and see if we came back to the same vmmap page
     await ctrl.execute("nextproginstr")
-    assert pwndbg.aglib.regs.pc in main_page
+    pc = pwndbg.aglib.regs.pc
+    assert pc is not None and main_page is not None
+    assert pc in main_page
 
 
 @pytest.mark.parametrize("command", NEXT_COMMANDS)
@@ -121,3 +128,21 @@ async def test_nextret_loop(ctrl: Controller) -> None:
     current_instruction = pwndbg.aglib.disasm.disassembly.one()
 
     assert current_instruction.id == X86_INS_RET
+
+
+@pwndbg_test
+async def test_command_nextcall_symbol_regex(ctrl: Controller) -> None:
+    import pwndbg.aglib.disasm.disassembly
+    import pwndbg.aglib.symbol
+
+    await launch_to(ctrl, REFERENCE_BINARY, "main")
+
+    # The test runner disables colors, so turn them back on for call targets
+    await ctrl.execute("set disable-colors off")
+    await ctrl.execute("set memory-code-color red")
+
+    await ctrl.execute("nextcall break_here")
+
+    ins = pwndbg.aglib.disasm.disassembly.one()
+    assert ins is not None
+    assert ins.target == pwndbg.aglib.symbol.lookup_symbol_addr("break_here")

@@ -31,6 +31,7 @@
 ## Darwin/libsystem/Mach-O
 
 -  [commpage](darwin_libsystem_mach-o/commpage.md) - Dumps all values from the macOS commpage.
+-  [objc](darwin_libsystem_mach-o/objc.md) - Objective-C Support
 
 ## Developer
 
@@ -38,7 +39,6 @@
 -  [log-level](developer/log-level.md) - Set the log level.
 -  [memoize](developer/memoize.md) - Toggles memoization (caching).
 -  [profiler](developer/profiler.md) - Utilities for profiling Pwndbg.
--  [reinit-pwndbg](developer/reinit-pwndbg.md) - Makes Pwndbg reinitialize all state.
 -  [reload](developer/reload.md) - Reload Pwndbg.
 
 ## Disassemble
@@ -176,7 +176,7 @@
 -  [patch-revert](misc/patch-revert.md) - Revert patch at given address.
 -  [patch](misc/patch.md) - Patches given instruction with given code or bytes.
 -  [plist](misc/plist.md) - Dumps the elements of a linked list.
--  [saveoutput](misc/saveoutput.md) - Save the output of a debugger command for later diffing.
+-  [setrlimit](misc/setrlimit.md) - Set a POSIX resource limit in the debugged process.
 -  [sigreturn](misc/sigreturn.md) - Display the SigreturnFrame at the specific address
 -  [spray](misc/spray.md) - Spray memory with cyclic() generated values
 -  [tips](misc/tips.md) - Shows tips.
