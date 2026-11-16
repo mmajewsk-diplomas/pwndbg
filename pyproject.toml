@@ -1,6 +1,6 @@
 [project]
 name = "pwndbg"
-version = "2026.07.29"
+version = "2026.10.28"
 description = "Exploit Development and Reverse Engineering with GDB Made Easy"
 authors = [{ name = "Dominik 'disconnect3d' Czarnota", email = "dominik.b.czarnota+dc@gmail.com" }]
 requires-python = ">=3.10, <4"
@@ -19,7 +19,7 @@ dependencies = [
     # We install uv to the venv
     "uv>=0.12.0",
     # Optional? only for 'ipi' command
-    "ipython>=8.39.0,<9 ; python_full_version <= '3.11'",
+    "ipython>=8.39.0,<9 ; python_full_version < '3.12'",
     "ipython>=8.39.0,<10 ; python_full_version >= '3.12'",
     # Optional? only for 'ropgadget' command
     "ropgadget==7.6",
@@ -31,17 +31,17 @@ dependencies = [
     "pt @ git+https://github.com/martinradev/gdb-pt-dump@50227bda0b6332e94027f811a15879588de6d5cb",
     # Optional? 'ziglang' must be optional, as it is not available on every platform.
     # It is only used for the 'cymbol' command and some `asm` functionality.
-    "ziglang==0.14.1 ; (platform_system == 'Linux' and platform_machine != 'loongarch64') or platform_system != 'Linux'",
+    "ziglang==0.17.1 ; (platform_system == 'Linux' and platform_machine != 'loongarch64') or platform_system != 'Linux'",
     # Used for symbol syncing (e.g. klookup --apply and decompiler integration)
-    "niche-elf==0.3.6",
+    "niche-elf==0.3.7",
     # This dep is optional.
     # For installing the decompiler plugins (we don't actually use it as a python library).
     # If you bump this, also bump the pwndbg/commands/decompiler_integration.py:d2d_required* variables.
     "decomp2dbg==3.14.1",
     # jpype1 is a transitive dependency of decomp2dbg
     # Note: newer versions have known build issues - see https://github.com/jpype-project/jpype/issues/1418
-    "jpype1==1.7.1 ; platform_machine == 'x86_64' or platform_machine == 'arm64'",
-    "jpype1==1.6.0 ; platform_machine != 'x86_64' and platform_machine != 'arm64'",
+    "jpype1==1.7.1 ; platform_machine == 'x86_64' or platform_machine == 'aarch64' or platform_machine == 'arm64'",
+    "jpype1==1.6.0 ; platform_machine != 'x86_64' and platform_machine != 'aarch64' and platform_machine != 'arm64'",
 ]
 
 [project.optional-dependencies]
@@ -52,7 +52,7 @@ lldb = [
     "lldb-for-pwndbg==23.1.0.post2",
 ]
 gdb = [
-    "gdb-for-pwndbg==17.2.0.post5",
+    "gdb-for-pwndbg==18.1.0.post1",
 ]
 
 [dependency-groups]
@@ -287,11 +287,11 @@ module = [
     "pwndbg.aglib.nearpc",
     "pwndbg.aglib.typeinfo",
 ]
-disable_error_code = ["name-defined", "attr-defined"]
+disable_error_code = ["attr-defined"]
 
 [[tool.mypy.overrides]]
-module = ["pwndbg.aglib.disasm.*"]
-disable_error_code = ["index", "name-defined", "attr-defined"]
+module = ["capstone6pwndbg", "capstone6pwndbg.*"]
+follow_untyped_imports = true
 
 # ===========================
 
